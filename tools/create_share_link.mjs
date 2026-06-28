@@ -54,16 +54,35 @@ function endOfMonthPacific(referenceDate) {
 
 function readArg(name) {
   const index = process.argv.indexOf(`--${name}`);
-  return index >= 0 ? process.argv[index + 1] : undefined;
+  if (index < 0) {
+    return undefined;
+  }
+  const value = process.argv[index + 1];
+  if (!value || value.startsWith("--")) {
+    throw new Error(`--${name} requires a value`);
+  }
+  return value;
 }
 
-const albumId = readArg("album");
+let albumId;
+let baseUrl;
+let expiresAt;
+try {
+  albumId = readArg("album");
+  baseUrl = readArg("base-url") ?? "https://photoalbum.ultizan.workers.dev";
+  expiresAt = readArg("expires-at") ?? endOfMonthPacific(new Date());
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
 const secret = process.env.SHARE_TOKEN_SECRET;
-const baseUrl = readArg("base-url") ?? "https://photoalbum.ultizan.workers.dev";
-const expiresAt = readArg("expires-at") ?? endOfMonthPacific(new Date());
 
 if (!albumId) {
   console.error("Usage: SHARE_TOKEN_SECRET=... npm run share-link -- --album <albumId> [--expires-at <iso>] [--base-url <url>]");
+  process.exit(1);
+}
+if (Number.isNaN(Date.parse(expiresAt))) {
+  console.error("--expires-at must be a valid date/time");
   process.exit(1);
 }
 if (!secret) {

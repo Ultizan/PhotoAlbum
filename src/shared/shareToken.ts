@@ -39,8 +39,20 @@ async function hmac(message: string, secret: string): Promise<string> {
   return toBase64Url(new Uint8Array(signature));
 }
 
+function isPayloadRecord(value: unknown): value is Partial<ShareTokenPayload> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function parsePayload(json: string): ShareTokenPayload {
-  const value = JSON.parse(json) as Partial<ShareTokenPayload>;
+  let value: unknown;
+  try {
+    value = JSON.parse(json);
+  } catch {
+    throw new Error("share token payload invalid");
+  }
+  if (!isPayloadRecord(value)) {
+    throw new Error("share token payload invalid");
+  }
   if (value.v !== 1) {
     throw new Error("share token version invalid");
   }
@@ -70,7 +82,12 @@ export async function verifyShareToken(token: string, secret: string, now = new 
     throw new Error("share token signature invalid");
   }
 
-  const payloadJson = new TextDecoder().decode(fromBase64Url(payloadPart));
+  let payloadJson: string;
+  try {
+    payloadJson = new TextDecoder().decode(fromBase64Url(payloadPart));
+  } catch {
+    throw new Error("share token payload invalid");
+  }
   const payload = parsePayload(payloadJson);
   if (Date.parse(payload.expiresAt) <= now.getTime()) {
     throw new Error("share token expired");
