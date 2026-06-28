@@ -1,0 +1,110 @@
+import type { AlbumIndex, AlbumManifest, AlbumSummary, PhotoManifestItem } from "./types";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function requireString(record: Record<string, unknown>, key: string): string {
+  const value = record[key];
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`${key} must be a non-empty string`);
+  }
+  return value;
+}
+
+function requireNumber(record: Record<string, unknown>, key: string): number {
+  const value = record[key];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${key} must be a finite number`);
+  }
+  return value;
+}
+
+function requireVersion(record: Record<string, unknown>): 1 {
+  if (record.version !== 1) {
+    throw new Error("version must be 1");
+  }
+  return 1;
+}
+
+function parseAlbumSummary(value: unknown): AlbumSummary {
+  if (!isRecord(value)) {
+    throw new Error("album summary must be an object");
+  }
+
+  return {
+    albumId: requireString(value, "albumId"),
+    title: requireString(value, "title"),
+    createdAt: requireString(value, "createdAt"),
+    coverPhotoId: requireString(value, "coverPhotoId"),
+    photoCount: requireNumber(value, "photoCount")
+  };
+}
+
+export function parseAlbumIndex(value: unknown): AlbumIndex {
+  if (!isRecord(value)) {
+    throw new Error("album index must be an object");
+  }
+  requireVersion(value);
+  if (!Array.isArray(value.albums)) {
+    throw new Error("albums must be an array");
+  }
+
+  return {
+    version: 1,
+    generatedAt: requireString(value, "generatedAt"),
+    albums: value.albums.map(parseAlbumSummary)
+  };
+}
+
+function parsePhoto(value: unknown, albumId: string): PhotoManifestItem {
+  if (!isRecord(value)) {
+    throw new Error("photo must be an object");
+  }
+
+  const id = requireString(value, "id");
+  const thumbPrefix = `albums/${albumId}/thumbs/`;
+  const fullPrefix = `albums/${albumId}/full/`;
+  const thumbPath = requireString(value, "thumbPath");
+  const fullPath = requireString(value, "fullPath");
+  if (!thumbPath.startsWith(thumbPrefix)) {
+    throw new Error(`thumbPath must stay within ${thumbPrefix}`);
+  }
+  if (!fullPath.startsWith(fullPrefix)) {
+    throw new Error(`fullPath must stay within ${fullPrefix}`);
+  }
+
+  const capturedAt = value.capturedAt;
+  return {
+    id,
+    filename: requireString(value, "filename"),
+    thumbPath,
+    fullPath,
+    width: requireNumber(value, "width"),
+    height: requireNumber(value, "height"),
+    ...(typeof capturedAt === "string" && capturedAt.length > 0 ? { capturedAt } : {})
+  };
+}
+
+export function parseAlbumManifest(value: unknown): AlbumManifest {
+  if (!isRecord(value)) {
+    throw new Error("album manifest must be an object");
+  }
+  requireVersion(value);
+  const albumId = requireString(value, "albumId");
+  if (value.visibility !== "access-controlled") {
+    throw new Error("visibility must be access-controlled");
+  }
+  if (!Array.isArray(value.photos)) {
+    throw new Error("photos must be an array");
+  }
+
+  return {
+    version: 1,
+    albumId,
+    title: requireString(value, "title"),
+    createdAt: requireString(value, "createdAt"),
+    visibility: "access-controlled",
+    photos: value.photos.map((photo) => parsePhoto(photo, albumId))
+  };
+}
