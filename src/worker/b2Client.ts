@@ -1,4 +1,4 @@
-import { parseAlbumIndex, parseAlbumManifest } from "../shared/validation";
+import { parseAlbumIndex, parseAlbumManifest, validateAlbumId } from "../shared/validation";
 import type { AlbumIndex, AlbumManifest } from "../shared/types";
 import type { Env } from "./env";
 import { buildSignedB2GetRequest } from "./b2Signer";
@@ -30,6 +30,7 @@ export async function fetchAlbumIndexFromB2(env: Env, fetcher?: Fetcher): Promis
 }
 
 export async function fetchAlbumManifestFromB2(env: Env, albumId: string, fetcher?: Fetcher): Promise<AlbumManifest> {
+  validateAlbumId(albumId);
   const manifest = parseAlbumManifest(await fetchJson(env, `albums/${albumId}/manifest.json`, fetcher));
   if (manifest.albumId !== albumId) {
     throw new Error(`B2 manifest albumId mismatch for ${albumId}`);

@@ -30,7 +30,7 @@ function requireVersion(record: Record<string, unknown>): 1 {
   return 1;
 }
 
-function validateAlbumId(albumId: string): void {
+export function validateAlbumId(albumId: string): void {
   if (!ALBUM_ID_PATTERN.test(albumId)) {
     throw new Error("albumId must use lowercase letters, numbers, and hyphens");
   }

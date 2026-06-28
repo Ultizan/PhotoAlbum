@@ -17,8 +17,8 @@ describe("B2 S3 signer", () => {
     expect(request.url).toBe("https://s3.us-west-004.backblazeb2.com/photos/albums/2026-family-trip/manifest.json");
     expect(request.headers.get("x-amz-date")).toBe("20260628T120000Z");
     expect(request.headers.get("x-amz-content-sha256")).toBe("UNSIGNED-PAYLOAD");
-    expect(request.headers.get("authorization")).toContain(
-      "AWS4-HMAC-SHA256 Credential=key-id/20260628/us-west-004/s3/aws4_request"
+    expect(request.headers.get("authorization")).toBe(
+      "AWS4-HMAC-SHA256 Credential=key-id/20260628/us-west-004/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=148a921447d9637212536714758f605a1f765d9eacf8175a0e031b615542d6f8"
     );
     expect(request.headers.get("authorization")).not.toContain("app-key");
   });
