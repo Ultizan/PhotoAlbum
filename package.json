@@ -12,6 +12,7 @@
     "build": "tsc -b && vite build",
     "test": "vitest run",
     "test:watch": "vitest",
+    "share-link": "node tools/create_share_link.mjs",
     "deploy": "npm run build && wrangler deploy",
     "cf-typegen": "wrangler types"
   },
