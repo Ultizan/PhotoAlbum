@@ -5,16 +5,51 @@ function base64Url(input) {
 }
 
 function endOfMonthPacific(referenceDate) {
-  const formatter = new Intl.DateTimeFormat("en-US", {
+  const monthFormatter = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Los_Angeles",
     year: "numeric",
     month: "numeric"
   });
-  const parts = Object.fromEntries(formatter.formatToParts(referenceDate).map((part) => [part.type, part.value]));
+  const parts = Object.fromEntries(monthFormatter.formatToParts(referenceDate).map((part) => [part.type, part.value]));
   const year = Number(parts.year);
   const month = Number(parts.month);
-  const firstOfNextMonthUtc = new Date(Date.UTC(year, month, 1, 7, 59, 59));
-  return firstOfNextMonthUtc.toISOString();
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    timeZoneName: "shortOffset",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  });
+  const target = { year, month, day: new Date(Date.UTC(year, month, 0)).getUTCDate(), hour: 23, minute: 59, second: 59 };
+  let guess = Date.UTC(target.year, target.month - 1, target.day, target.hour, target.minute, target.second);
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const rendered = Object.fromEntries(formatter.formatToParts(new Date(guess)).map((part) => [part.type, part.value]));
+    const offsetMatch = rendered.timeZoneName.match(/^GMT([+-])(\d{1,2})(?::(\d{2}))?$/);
+    if (!offsetMatch) {
+      throw new Error(`Could not determine America/Los_Angeles offset: ${rendered.timeZoneName}`);
+    }
+    const sign = offsetMatch[1] === "+" ? 1 : -1;
+    const offsetMinutes = sign * (Number(offsetMatch[2]) * 60 + Number(offsetMatch[3] ?? "0"));
+    const nextGuess = Date.UTC(
+      target.year,
+      target.month - 1,
+      target.day,
+      target.hour,
+      target.minute,
+      target.second
+    ) - offsetMinutes * 60_000;
+    if (nextGuess === guess) {
+      return new Date(guess).toISOString();
+    }
+    guess = nextGuess;
+  }
+
+  return new Date(guess).toISOString();
 }
 
 function readArg(name) {
