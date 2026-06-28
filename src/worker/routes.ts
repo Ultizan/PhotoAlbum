@@ -22,7 +22,7 @@ export async function handleRequest(ctx: RequestContext): Promise<Response> {
   const { request, env, url } = ctx;
 
   if (isPrivateApiPath(url.pathname) || isPrivateImagePath(url.pathname)) {
-    const identity = getAccessIdentity(request, env);
+    const identity = await getAccessIdentity(request, env);
     if (identity instanceof Response) {
       return identity;
     }
