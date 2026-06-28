@@ -50,3 +50,15 @@ input {
   width: min(1180px, calc(100% - 2rem));
   margin: 1.5rem auto;
 }
+
+.album-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  color: inherit;
+  text-decoration: none;
+  background: #ffffff;
+  border: 1px solid #dbe3de;
+  border-radius: 8px;
+}
