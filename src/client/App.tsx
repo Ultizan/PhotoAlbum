@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { getAlbumIndex, getAlbumManifest, getSharedAlbum } from "./api";
+import { AlbumGrid } from "./components/AlbumGrid";
+import { AlbumList } from "./components/AlbumList";
 import type { AlbumIndex, AlbumManifest } from "./types";
 
 type AppRoute =
@@ -12,7 +14,7 @@ type LoadState =
   | { status: "loading" }
   | { status: "error" }
   | { status: "index"; index: AlbumIndex }
-  | { status: "album"; album: AlbumManifest };
+  | { status: "album"; album: AlbumManifest; shareToken?: string };
 
 function safeDecodePathSegment(value: string): string | undefined {
   try {
@@ -58,19 +60,10 @@ function renderContent(state: LoadState, route: AppRoute) {
   }
 
   if (state.status === "album") {
-    return <h2>{state.album.title}</h2>;
+    return <AlbumGrid album={state.album} shareToken={state.shareToken} />;
   }
 
-  return (
-    <div>
-      {state.index.albums.map((album) => (
-        <a className="album-row" href={`/albums/${album.albumId}`} key={album.albumId}>
-          <span>{album.title}</span>
-          <span>{album.photoCount} photos</span>
-        </a>
-      ))}
-    </div>
-  );
+  return <AlbumList index={state.index} />;
 }
 
 export function App() {
@@ -105,7 +98,11 @@ export function App() {
             : await getAlbumManifest(route.albumId);
 
         if (!canceled) {
-          setState({ status: "album", album });
+          setState({
+            status: "album",
+            album,
+            shareToken: route.kind === "sharedAlbum" ? route.token : undefined
+          });
         }
       } catch {
         if (!canceled) {
