@@ -2,6 +2,27 @@ import { describe, expect, it } from "vitest";
 import { parseAlbumIndex, parseAlbumManifest } from "./validation";
 
 describe("manifest validation", () => {
+  function validAlbumManifest() {
+    return {
+      version: 1,
+      albumId: "2026-family-trip",
+      title: "2026 Family Trip",
+      createdAt: "2026-06-27",
+      visibility: "access-controlled",
+      photos: [
+        {
+          id: "img_001",
+          filename: "img_001.jpg",
+          thumbPath: "albums/2026-family-trip/thumbs/img_001.webp",
+          fullPath: "albums/2026-family-trip/full/img_001.jpg",
+          width: 6000,
+          height: 4000,
+          capturedAt: "2026-06-20T19:34:00"
+        }
+      ]
+    };
+  }
+
   it("accepts a valid album index", () => {
     const index = parseAlbumIndex({
       version: 1,
@@ -18,6 +39,12 @@ describe("manifest validation", () => {
     });
 
     expect(index.albums[0].albumId).toBe("2026-family-trip");
+  });
+
+  it("accepts a valid album manifest and preserves capturedAt", () => {
+    const manifest = parseAlbumManifest(validAlbumManifest());
+
+    expect(manifest.photos[0].capturedAt).toBe("2026-06-20T19:34:00");
   });
 
   it("rejects a photo path outside its album prefix", () => {
@@ -41,5 +68,53 @@ describe("manifest validation", () => {
         ]
       })
     ).toThrow("thumbPath must stay within albums/2026-family-trip/thumbs/");
+  });
+
+  it("rejects an unsafe album id", () => {
+    const manifest = validAlbumManifest();
+    manifest.albumId = "../private";
+    manifest.photos[0].thumbPath = "albums/../private/thumbs/img_001.webp";
+    manifest.photos[0].fullPath = "albums/../private/full/img_001.jpg";
+
+    expect(() => parseAlbumManifest(manifest)).toThrow(
+      "albumId must use lowercase letters, numbers, and hyphens"
+    );
+  });
+
+  it("rejects a thumbnail path with traversal after the album prefix", () => {
+    const manifest = validAlbumManifest();
+    manifest.photos[0].thumbPath = "albums/2026-family-trip/thumbs/../img_001.webp";
+
+    expect(() => parseAlbumManifest(manifest)).toThrow(
+      "thumbPath must be the canonical thumbnail path for img_001"
+    );
+  });
+
+  it("rejects a full path with traversal after the album prefix", () => {
+    const manifest = validAlbumManifest();
+    manifest.photos[0].fullPath = "albums/2026-family-trip/full/../img_001.jpg";
+
+    expect(() => parseAlbumManifest(manifest)).toThrow(
+      "fullPath must be the canonical full path for img_001"
+    );
+  });
+
+  it("rejects a filename that does not match the photo id", () => {
+    const manifest = validAlbumManifest();
+    manifest.photos[0].filename = "other.jpg";
+
+    expect(() => parseAlbumManifest(manifest)).toThrow(
+      "filename must match photo id with .jpg extension"
+    );
+  });
+
+  it("rejects a photo id outside img_### format", () => {
+    const manifest = validAlbumManifest();
+    manifest.photos[0].id = "photo_001";
+    manifest.photos[0].filename = "photo_001.jpg";
+    manifest.photos[0].thumbPath = "albums/2026-family-trip/thumbs/photo_001.webp";
+    manifest.photos[0].fullPath = "albums/2026-family-trip/full/photo_001.jpg";
+
+    expect(() => parseAlbumManifest(manifest)).toThrow("photo id must use img_### format");
   });
 });

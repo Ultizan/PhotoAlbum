@@ -1,5 +1,8 @@
 import type { AlbumIndex, AlbumManifest, AlbumSummary, PhotoManifestItem } from "./types";
 
+const ALBUM_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+const PHOTO_ID_PATTERN = /^img_[0-9]{3,}$/;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -25,6 +28,18 @@ function requireVersion(record: Record<string, unknown>): 1 {
     throw new Error("version must be 1");
   }
   return 1;
+}
+
+function validateAlbumId(albumId: string): void {
+  if (!ALBUM_ID_PATTERN.test(albumId)) {
+    throw new Error("albumId must use lowercase letters, numbers, and hyphens");
+  }
+}
+
+function validatePhotoId(id: string): void {
+  if (!PHOTO_ID_PATTERN.test(id)) {
+    throw new Error("photo id must use img_### format");
+  }
 }
 
 function parseAlbumSummary(value: unknown): AlbumSummary {
@@ -63,21 +78,35 @@ function parsePhoto(value: unknown, albumId: string): PhotoManifestItem {
   }
 
   const id = requireString(value, "id");
+  validatePhotoId(id);
+  const filename = requireString(value, "filename");
+  if (filename !== `${id}.jpg`) {
+    throw new Error("filename must match photo id with .jpg extension");
+  }
+
   const thumbPrefix = `albums/${albumId}/thumbs/`;
   const fullPrefix = `albums/${albumId}/full/`;
+  const expectedThumbPath = `${thumbPrefix}${id}.webp`;
+  const expectedFullPath = `${fullPrefix}${id}.jpg`;
   const thumbPath = requireString(value, "thumbPath");
   const fullPath = requireString(value, "fullPath");
   if (!thumbPath.startsWith(thumbPrefix)) {
     throw new Error(`thumbPath must stay within ${thumbPrefix}`);
   }
+  if (thumbPath !== expectedThumbPath) {
+    throw new Error(`thumbPath must be the canonical thumbnail path for ${id}`);
+  }
   if (!fullPath.startsWith(fullPrefix)) {
     throw new Error(`fullPath must stay within ${fullPrefix}`);
+  }
+  if (fullPath !== expectedFullPath) {
+    throw new Error(`fullPath must be the canonical full path for ${id}`);
   }
 
   const capturedAt = value.capturedAt;
   return {
     id,
-    filename: requireString(value, "filename"),
+    filename,
     thumbPath,
     fullPath,
     width: requireNumber(value, "width"),
@@ -92,6 +121,7 @@ export function parseAlbumManifest(value: unknown): AlbumManifest {
   }
   requireVersion(value);
   const albumId = requireString(value, "albumId");
+  validateAlbumId(albumId);
   if (value.visibility !== "access-controlled") {
     throw new Error("visibility must be access-controlled");
   }
