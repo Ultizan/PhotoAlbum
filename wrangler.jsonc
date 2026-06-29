@@ -3,6 +3,11 @@
   "name": "photoalbum",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-06-28",
+  "workers_dev": true,
+  "preview_urls": true,
+  "vars": {
+    "B2_ENDPOINT": "https://s3.us-west-004.backblazeb2.com"
+  },
   "assets": {
     "directory": "./dist/client",
     "binding": "ASSETS",

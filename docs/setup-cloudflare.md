@@ -20,6 +20,8 @@ Set these as Worker secrets:
 npx wrangler secret put B2_KEY_ID
 npx wrangler secret put B2_APPLICATION_KEY
 npx wrangler secret put SHARE_TOKEN_SECRET
+npx wrangler secret put ACCESS_AUD
+npx wrangler secret put ACCESS_ISSUER
 ```
 
 ## Worker Variables
@@ -28,11 +30,10 @@ Set these Worker variables in Cloudflare:
 
 ```text
 B2_BUCKET_NAME
-B2_ENDPOINT
 B2_REGION
-ACCESS_AUD
-ACCESS_ISSUER
 ```
+
+`B2_ENDPOINT` is a non-secret value committed in `wrangler.jsonc` so deploys preserve the URL scheme required by the S3 signer.
 
 `ACCESS_ISSUER` should look like:
 
@@ -59,6 +60,8 @@ Do not protect share-link paths:
 /share-api/*
 /share-img/*
 ```
+
+Create those share-link paths as a separate Access application with a `Bypass` policy for `Everyone`; otherwise Access will still redirect share-link visitors to login.
 
 For family use, a one-time PIN policy with explicit email addresses is enough. Deny everyone else.
 
