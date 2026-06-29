@@ -5,10 +5,10 @@
 - Worker name: `photoalbum`
 - Production URL: `photoalbum.ultizan.workers.dev`
 - Preview URL pattern: `*-photoalbum.ultizan.workers.dev`
-- Build command: `npm run build`
+- Build command: none required when deploy command is `npx wrangler deploy`
 - Deploy command: `npx wrangler deploy`
 
-This repo uses the Cloudflare Vite plugin. After `npm run build`, Wrangler redirects deployment to the generated config at `dist/client/photoalbum/wrangler.json` and serves static assets from `dist/client/client`.
+This repo uses the Cloudflare Vite plugin. `wrangler.jsonc` has `build.command = "npm run build"`, so a raw `npx wrangler deploy` runs the Vite build before checking the configured assets directory. The browser assets are generated at `dist/client`, and the Worker bundle/config are generated at `dist/photoalbum`.
 
 `wrangler.jsonc` intentionally does not contain deployment values for B2 or Access. It sets `keep_vars: true`, so Worker variables managed in the Cloudflare dashboard are not deleted or replaced by local placeholder values during deploy.
 

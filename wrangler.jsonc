@@ -3,6 +3,9 @@
   "name": "photoalbum",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-06-28",
+  "build": {
+    "command": "npm run build"
+  },
   "workers_dev": true,
   "preview_urls": true,
   "vars": {
