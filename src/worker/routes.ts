@@ -11,6 +11,7 @@ type TestableEnv = RequestContext["env"] & {
   TEST_B2_INDEX_JSON?: string;
   TEST_B2_MANIFEST_JSON?: string;
   TEST_B2_OBJECT_BODY?: string;
+  TEST_B2_ECHO_OBJECT_PATH?: string;
   TEST_B2_OBJECT_STATUS?: number;
 };
 
@@ -31,7 +32,7 @@ function isShareImagePath(pathname: string): boolean {
 }
 
 function testB2Fetch(env: TestableEnv): ((request: Request) => Promise<Response>) | undefined {
-  if (!env.TEST_B2_INDEX_JSON && !env.TEST_B2_MANIFEST_JSON && !env.TEST_B2_OBJECT_BODY) {
+  if (!env.TEST_B2_INDEX_JSON && !env.TEST_B2_MANIFEST_JSON && !env.TEST_B2_OBJECT_BODY && !env.TEST_B2_ECHO_OBJECT_PATH) {
     return undefined;
   }
   return async (request: Request) => {
@@ -42,7 +43,8 @@ function testB2Fetch(env: TestableEnv): ((request: Request) => Promise<Response>
     if (pathname.endsWith("/manifest.json") && env.TEST_B2_MANIFEST_JSON) {
       return new Response(env.TEST_B2_MANIFEST_JSON);
     }
-    return new Response(env.TEST_B2_OBJECT_BODY ?? "object-body", {
+    const body = env.TEST_B2_ECHO_OBJECT_PATH === "true" ? pathname : (env.TEST_B2_OBJECT_BODY ?? "object-body");
+    return new Response(body, {
       status: env.TEST_B2_OBJECT_STATUS ?? 200,
       headers: { "content-type": "image/jpeg" }
     });
@@ -122,6 +124,10 @@ function parseShareImagePath(pathname: string): { token: string; kind: ImageKind
 
 function imageCacheControl(kind: ImageKind): string {
   return kind === "thumb" ? "private, max-age=86400" : "private, max-age=0";
+}
+
+function shareCacheControl(): string {
+  return "private, no-store";
 }
 
 async function proxyObject(ctx: RequestContext, key: string, cacheControl: string): Promise<Response> {
@@ -209,7 +215,7 @@ async function handleShareApi(ctx: RequestContext): Promise<Response> {
   try {
     const payload = await verifyShareToken(sharePath.token, ctx.env.SHARE_TOKEN_SECRET);
     const manifest = await fetchAlbumManifestFromB2(ctx.env, payload.albumId, testB2Fetch(ctx.env as TestableEnv));
-    return jsonResponse(manifest, { headers: { "cache-control": "private, max-age=60" } });
+    return jsonResponse(manifest, { headers: { "cache-control": shareCacheControl() } });
   } catch {
     return errorResponse(403, "forbidden", "Share token is invalid or album is unavailable");
   }
@@ -234,7 +240,7 @@ async function handleShareImage(ctx: RequestContext): Promise<Response> {
     return errorResponse(404, "not_found", "Photo not found");
   }
 
-  return proxyShareObject(ctx, key, imageCacheControl(imagePath.kind));
+  return proxyShareObject(ctx, key, shareCacheControl());
 }
 
 export async function handleRequest(ctx: RequestContext): Promise<Response> {

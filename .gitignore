@@ -1,12 +1,11 @@
 .superpowers/
 node_modules/
 dist/
-dist-albums/
+dist-albums*/
+.wrangler/
+.env
+.dev.vars
 .venv/
 __pycache__/
 .pytest_cache/
-.wrangler/
 *.tsbuildinfo
-.dev.vars*
-.env.local
-.env.*.local

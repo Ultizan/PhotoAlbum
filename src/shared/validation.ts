@@ -42,6 +42,28 @@ function validatePhotoId(id: string): void {
   }
 }
 
+function validateFilename(filename: string): void {
+  if (
+    filename === "." ||
+    filename === ".." ||
+    filename.includes("/") ||
+    filename.includes("\\") ||
+    filename.includes("\0")
+  ) {
+    throw new Error("filename must be a basename");
+  }
+}
+
+function validateObjectKey(key: string, fieldName: string): void {
+  if (key.startsWith("/") || key.includes("\\") || key.includes("\0")) {
+    throw new Error(`${fieldName} must be a safe relative object key`);
+  }
+  const parts = key.split("/");
+  if (parts.some((part) => part.length === 0 || part === "." || part === "..")) {
+    throw new Error(`${fieldName} must be a safe relative object key`);
+  }
+}
+
 function parseAlbumSummary(value: unknown): AlbumSummary {
   if (!isRecord(value)) {
     throw new Error("album summary must be an object");
@@ -80,14 +102,10 @@ function parsePhoto(value: unknown, albumId: string): PhotoManifestItem {
   const id = requireString(value, "id");
   validatePhotoId(id);
   const filename = requireString(value, "filename");
-  if (filename !== `${id}.jpg`) {
-    throw new Error("filename must match photo id with .jpg extension");
-  }
+  validateFilename(filename);
 
   const thumbPrefix = `albums/${albumId}/thumbs/`;
-  const fullPrefix = `albums/${albumId}/full/`;
   const expectedThumbPath = `${thumbPrefix}${id}.webp`;
-  const expectedFullPath = `${fullPrefix}${id}.jpg`;
   const thumbPath = requireString(value, "thumbPath");
   const fullPath = requireString(value, "fullPath");
   if (!thumbPath.startsWith(thumbPrefix)) {
@@ -96,12 +114,7 @@ function parsePhoto(value: unknown, albumId: string): PhotoManifestItem {
   if (thumbPath !== expectedThumbPath) {
     throw new Error(`thumbPath must be the canonical thumbnail path for ${id}`);
   }
-  if (!fullPath.startsWith(fullPrefix)) {
-    throw new Error(`fullPath must stay within ${fullPrefix}`);
-  }
-  if (fullPath !== expectedFullPath) {
-    throw new Error(`fullPath must be the canonical full path for ${id}`);
-  }
+  validateObjectKey(fullPath, "fullPath");
 
   const capturedAt = value.capturedAt;
   return {

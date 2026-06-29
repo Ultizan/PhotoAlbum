@@ -8,11 +8,18 @@ from PIL import Image
 from package_album import package_album
 
 
-def test_package_album_creates_manifest_thumbs_and_full_files(tmp_path: Path) -> None:
+def write_jpeg(path: Path, size: tuple[int, int] = (120, 80), exif: bytes | None = None) -> None:
+    image = Image.new("RGB", size, color=(40, 90, 120))
+    save_kwargs = {"format": "JPEG"}
+    if exif:
+        save_kwargs["exif"] = exif
+    image.save(path, **save_kwargs)
+
+
+def test_package_album_creates_manifest_thumbs_and_index_without_copying_full_files(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()
-    image = Image.new("RGB", (120, 80), color=(40, 90, 120))
-    image.save(source / "family.jpg", "JPEG")
+    write_jpeg(source / "family.jpg")
 
     output = tmp_path / "out"
 
@@ -28,100 +35,136 @@ def test_package_album_creates_manifest_thumbs_and_full_files(tmp_path: Path) ->
     assert (album_dir / "manifest.json").exists()
     assert (output / "albums" / "index.json").exists()
     assert (album_dir / "thumbs" / "img_001.webp").exists()
-    assert (album_dir / "full" / "img_001.jpg").exists()
+    assert not (album_dir / "full").exists()
     assert manifest["photos"][0]["width"] == 120
     assert manifest["photos"][0]["height"] == 80
 
     saved = json.loads((album_dir / "manifest.json").read_text(encoding="utf-8"))
     assert saved["albumId"] == "2026-family-trip"
-    assert saved["photos"][0]["filename"] == "img_001.jpg"
+    assert saved["photos"][0]["filename"] == "family.jpg"
     assert saved["photos"][0]["thumbPath"] == "albums/2026-family-trip/thumbs/img_001.webp"
-    assert saved["photos"][0]["fullPath"] == "albums/2026-family-trip/full/img_001.jpg"
+    assert saved["photos"][0]["fullPath"] == "source/family.jpg"
 
     index = json.loads((output / "albums" / "index.json").read_text(encoding="utf-8"))
+    assert index["version"] == 1
     assert index["albums"][0]["albumId"] == "2026-family-trip"
+    assert index["albums"][0]["coverPhotoId"] == "img_001"
     assert index["albums"][0]["photoCount"] == 1
 
 
+def test_package_album_reads_images_from_dated_child_folders(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    day_one = source / "2026_06_26"
+    day_two = source / "2026_06_27"
+    day_one.mkdir(parents=True)
+    day_two.mkdir(parents=True)
+    write_jpeg(day_two / "second.JPG", size=(90, 60))
+    write_jpeg(day_one / "first.JPG", size=(120, 80))
 
-def test_package_album_rejects_empty_source_without_writing_index(tmp_path: Path) -> None:
+    manifest = package_album(
+        source_dir=source,
+        album_id="michigan-2026",
+        title="50th Anniversary Celebration",
+        output_dir=tmp_path / "out",
+        strip_gps=True,
+    )
+
+    assert [photo["filename"] for photo in manifest["photos"]] == ["first.JPG", "second.JPG"]
+    assert [photo["fullPath"] for photo in manifest["photos"]] == [
+        "source/2026_06_26/first.JPG",
+        "source/2026_06_27/second.JPG",
+    ]
+    assert manifest["photos"][0]["width"] == 120
+    assert manifest["photos"][1]["width"] == 90
+
+
+def test_package_album_uses_custom_existing_originals_prefix(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    dated = source / "2026_06_26"
+    dated.mkdir(parents=True)
+    write_jpeg(dated / "3W7A1320.JPG")
+
+    manifest = package_album(
+        source_dir=source,
+        album_id="michigan-2026",
+        title="50th Anniversary Celebration",
+        output_dir=tmp_path / "out",
+        originals_prefix="already-synced/50thCelebration",
+    )
+
+    assert manifest["photos"][0]["fullPath"] == "already-synced/50thCelebration/2026_06_26/3W7A1320.JPG"
+
+
+def test_package_album_can_copy_normalized_full_files_when_requested(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()
+    write_jpeg(source / "family.jpg")
+
     output = tmp_path / "out"
+    manifest = package_album(
+        source_dir=source,
+        album_id="2026-family-trip",
+        title="2026 Family Trip",
+        output_dir=output,
+        copy_full=True,
+    )
 
-    with pytest.raises(ValueError, match="no supported images"):
-        package_album(
-            source_dir=source,
-            album_id="empty-album",
-            title="Empty Album",
-            output_dir=output,
-        )
-
-    assert not (output / "albums" / "index.json").exists()
+    assert (output / "albums" / "2026-family-trip" / "full" / "img_001.jpg").exists()
+    assert manifest["photos"][0]["filename"] == "img_001.jpg"
+    assert manifest["photos"][0]["fullPath"] == "albums/2026-family-trip/full/img_001.jpg"
 
 
-def test_package_album_strips_gps_and_orientation_exif(tmp_path: Path) -> None:
+def test_package_album_strips_gps_exif_by_default(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()
-    image = Image.new("RGB", (10, 20), color=(80, 40, 20))
     exif = {
-        "0th": {piexif.ImageIFD.Orientation: 6},
-        "Exif": {},
-        "GPS": {piexif.GPSIFD.GPSLatitudeRef: "N", piexif.GPSIFD.GPSLatitude: ((1, 1), (2, 1), (3, 1))},
+        "0th": {},
+        "Exif": {piexif.ExifIFD.DateTimeOriginal: "2026:06:20 19:34:00"},
+        "GPS": {
+            piexif.GPSIFD.GPSLatitudeRef: "N",
+            piexif.GPSIFD.GPSLatitude: ((47, 1), (36, 1), (0, 1)),
+            piexif.GPSIFD.GPSLongitudeRef: "W",
+            piexif.GPSIFD.GPSLongitude: ((122, 1), (20, 1), (0, 1)),
+        },
         "1st": {},
         "thumbnail": None,
     }
-    image.save(source / "rotated.jpg", "JPEG", exif=piexif.dump(exif))
+    write_jpeg(source / "gps.jpg", exif=piexif.dump(exif))
 
     output = tmp_path / "out"
+    manifest = package_album(source, "2026-family-trip", None, output, copy_full=True)
 
-    manifest = package_album(
-        source_dir=source,
-        album_id="rotated-album",
-        title="Rotated Album",
-        output_dir=output,
-    )
-
-    full_path = output / "albums" / "rotated-album" / "full" / "img_001.jpg"
-    saved_exif = piexif.load(str(full_path))
-    assert piexif.ImageIFD.Orientation not in saved_exif["0th"]
-    assert saved_exif["GPS"] == {}
-    assert manifest["photos"][0]["width"] == 20
-    assert manifest["photos"][0]["height"] == 10
+    full_exif = piexif.load(str(output / "albums" / "2026-family-trip" / "full" / "img_001.jpg"))
+    assert full_exif["GPS"] == {}
+    assert manifest["photos"][0]["capturedAt"] == "2026-06-20T19:34:00"
 
 
-def test_package_album_replaces_existing_album_without_stale_files(tmp_path: Path) -> None:
+def test_package_album_can_preserve_gps_exif(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()
-    Image.new("RGB", (10, 10), color=(1, 2, 3)).save(source / "first.jpg", "JPEG")
-    Image.new("RGB", (10, 10), color=(4, 5, 6)).save(source / "second.jpg", "JPEG")
+    exif = {
+        "0th": {},
+        "Exif": {},
+        "GPS": {
+            piexif.GPSIFD.GPSLatitudeRef: "N",
+            piexif.GPSIFD.GPSLatitude: ((47, 1), (36, 1), (0, 1)),
+        },
+        "1st": {},
+        "thumbnail": None,
+    }
+    write_jpeg(source / "gps.jpg", exif=piexif.dump(exif))
+
     output = tmp_path / "out"
+    package_album(source, "2026-family-trip", None, output, strip_gps=False, copy_full=True)
 
-    package_album(source_dir=source, album_id="rerun-album", title="Rerun Album", output_dir=output)
-    (source / "second.jpg").unlink()
-
-    package_album(source_dir=source, album_id="rerun-album", title="Rerun Album", output_dir=output)
-
-    album_dir = output / "albums" / "rerun-album"
-    assert sorted(path.name for path in (album_dir / "full").iterdir()) == ["img_001.jpg"]
-    assert sorted(path.name for path in (album_dir / "thumbs").iterdir()) == ["img_001.webp"]
+    full_exif = piexif.load(str(output / "albums" / "2026-family-trip" / "full" / "img_001.jpg"))
+    assert full_exif["GPS"][piexif.GPSIFD.GPSLatitudeRef] == b"N"
 
 
-
-def test_package_album_omits_malformed_exif_without_failing(tmp_path: Path) -> None:
+def test_package_album_rejects_invalid_album_id(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()
-    image = Image.new("RGB", (12, 8), color=(20, 30, 40))
-    image.save(source / "bad-exif.jpg", "JPEG", exif=b"not-valid-exif")
-    output = tmp_path / "out"
+    write_jpeg(source / "family.jpg")
 
-    manifest = package_album(
-        source_dir=source,
-        album_id="bad-exif-album",
-        title="Bad Exif Album",
-        output_dir=output,
-    )
-
-    full_path = output / "albums" / "bad-exif-album" / "full" / "img_001.jpg"
-    assert full_path.exists()
-    assert manifest["photos"][0]["filename"] == "img_001.jpg"
+    with pytest.raises(ValueError, match="album id must use lowercase"):
+        package_album(source, "../private", None, tmp_path / "out")

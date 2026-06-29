@@ -8,11 +8,5 @@
     "binding": "ASSETS",
     "not_found_handling": "single-page-application"
   },
-  "vars": {
-    "B2_BUCKET_NAME": "set-in-cloudflare",
-    "B2_ENDPOINT": "https://s3.us-west-004.backblazeb2.com",
-    "B2_REGION": "us-west-004",
-    "ACCESS_AUD": "set-in-cloudflare",
-    "ACCESS_ISSUER": "https://set-in-cloudflare.cloudflareaccess.com"
-  }
+  "keep_vars": true
 }

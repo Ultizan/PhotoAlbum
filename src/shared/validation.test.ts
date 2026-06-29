@@ -47,6 +47,17 @@ describe("manifest validation", () => {
     expect(manifest.photos[0].capturedAt).toBe("2026-06-20T19:34:00");
   });
 
+  it("accepts a manifest that points full-size images at existing synced originals", () => {
+    const manifest = validAlbumManifest();
+    manifest.photos[0].filename = "3W7A1320.JPG";
+    manifest.photos[0].fullPath = "50thCelebration/2026_06_26/3W7A1320.JPG";
+
+    expect(parseAlbumManifest(manifest).photos[0]).toMatchObject({
+      filename: "3W7A1320.JPG",
+      fullPath: "50thCelebration/2026_06_26/3W7A1320.JPG"
+    });
+  });
+
   it("rejects a photo path outside its album prefix", () => {
     expect(() =>
       parseAlbumManifest({
@@ -90,22 +101,20 @@ describe("manifest validation", () => {
     );
   });
 
-  it("rejects a full path with traversal after the album prefix", () => {
+  it("rejects an unsafe full path with traversal", () => {
     const manifest = validAlbumManifest();
-    manifest.photos[0].fullPath = "albums/2026-family-trip/full/../img_001.jpg";
+    manifest.photos[0].fullPath = "50thCelebration/../private/secret.JPG";
 
     expect(() => parseAlbumManifest(manifest)).toThrow(
-      "fullPath must be the canonical full path for img_001"
+      "fullPath must be a safe relative object key"
     );
   });
 
-  it("rejects a filename that does not match the photo id", () => {
+  it("rejects a filename with path separators", () => {
     const manifest = validAlbumManifest();
-    manifest.photos[0].filename = "other.jpg";
+    manifest.photos[0].filename = "../other.jpg";
 
-    expect(() => parseAlbumManifest(manifest)).toThrow(
-      "filename must match photo id with .jpg extension"
-    );
+    expect(() => parseAlbumManifest(manifest)).toThrow("filename must be a basename");
   });
 
   it("rejects a photo id outside img_### format", () => {

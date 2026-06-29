@@ -1,75 +1,70 @@
-# PhotoAlbum
+# Photo Album
 
-Private photo gallery for albums stored in private Backblaze B2 and served through Cloudflare Workers.
+Private photo gallery for albums stored in a private Backblaze B2 bucket and served through Cloudflare Workers.
+
+The app is a Cloudflare Worker with static React assets. Private routes are protected by Cloudflare Access, while keyed share links are validated by the Worker and expire at the date encoded in the link.
 
 ## Development
 
-Install dependencies:
-
 ```bash
 npm install
-```
-
-Run the local development server:
-
-```bash
 npm run dev
 ```
 
-For local Worker secrets, copy `.env.example` to `.dev.vars` and fill in local values. `.dev.vars*` files are ignored by git. For `npm run share-link`, pass `SHARE_TOKEN_SECRET` in the shell environment for that command.
-
-## Preview Worker Runtime
-
-Build the client and Worker:
+## Preview The Worker Runtime
 
 ```bash
 npm run build
-```
-
-Preview the built Worker runtime:
-
-```bash
 npm run preview
 ```
 
 ## Test
 
-Run the TypeScript test suite:
-
 ```bash
 npm test
-```
-
-Run the album packaging tests with dependencies isolated through `uv`:
-
-```bash
-uv run --with-requirements tools/requirements.txt python -m pytest tools/test_package_album.py
-```
-
-If you already installed the Python tool dependencies, this also works:
-
-```bash
 python -m pytest tools/test_package_album.py
 ```
 
-## Deploy
-
-This repo is connected to Cloudflare Workers Builds. Push to `main` to deploy the `photoalbum` Worker at:
-
-```text
-https://photoalbum.ultizan.workers.dev
-```
-
-Ensure Workers Builds runs `npm run build` before Wrangler deploy so `dist/client` exists. Running raw Wrangler deploy before the build will fail because Wrangler expects the configured assets directory at `dist/client`.
-
-Manual deploys can use:
+Or with `uv`:
 
 ```bash
-npm run deploy
+uv run --managed-python --with-requirements tools/requirements.txt pytest tools/test_package_album.py
 ```
 
-## Docs
+## Package An Album
 
-- [Cloudflare setup](docs/setup-cloudflare.md)
-- [Publish an album](docs/publish-album.md)
-- [Design spec](docs/superpowers/specs/2026-06-28-private-photo-gallery-design.md)
+By default this creates `manifest.json`, `albums/index.json`, and thumbnails only. Full-size originals are expected to already exist in B2 under keys that match the source folder name and relative file paths.
+
+```bash
+python --version
+python -m pip install -r tools/requirements.txt
+python tools/package_album.py ./photos/2026-family-trip --album 2026-family-trip --title "2026 Family Trip"
+```
+
+Or with `uv`:
+
+```bash
+uv run --managed-python --with-requirements tools/requirements.txt python tools/package_album.py ./photos/2026-family-trip --album 2026-family-trip --title "2026 Family Trip"
+```
+
+For a synced folder named `50thCelebration`, a file such as `50thCelebration/2026_06_26/3W7A1320.JPG` is referenced directly by the manifest. Use `--originals-prefix` if your B2 sync uses a different object-key prefix.
+
+Upload the generated `dist-albums/albums/` contents into the private B2 bucket under the same `albums/` prefix. Use `--copy-full` only when you want the tool to create normalized full-size JPEG copies.
+
+## Generate A Share Link
+
+```bash
+SHARE_TOKEN_SECRET=... npm run share-link -- --album 2026-family-trip
+```
+
+By default, share links expire at the end of the current month in Pacific time.
+
+## Deploy
+
+This repo is connected to Cloudflare Workers Builds. Push to `main` to deploy `photoalbum.ultizan.workers.dev`.
+
+See:
+
+- `docs/setup-cloudflare.md`
+- `docs/publish-album.md`
+- `docs/superpowers/specs/2026-06-28-private-photo-gallery-design.md`

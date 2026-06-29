@@ -3,8 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import shutil
-import tempfile
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -20,18 +18,12 @@ except Exception:
     pass
 
 
-SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".heif"}
-ALBUM_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]*")
+SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
+ALBUM_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
 def title_from_album_id(album_id: str) -> str:
-    return " ".join(part.capitalize() for part in album_id.replace("_", "-").split("-") if part)
-
-
-def sorted_images(source_dir: Path) -> list[Path]:
-    return sorted(
-        path for path in source_dir.iterdir() if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
-    )
+    return " ".join(part.capitalize() for part in album_id.split("-") if part)
 
 
 def safe_album_id(album_id: str) -> str:
@@ -40,15 +32,60 @@ def safe_album_id(album_id: str) -> str:
     return album_id
 
 
+def sorted_images(source_dir: Path) -> list[Path]:
+    def sort_key(path: Path) -> tuple[str, ...]:
+        return tuple(part.lower() for part in path.relative_to(source_dir).parts)
+
+    return sorted(
+        (
+            path
+            for path in source_dir.rglob("*")
+            if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
+        ),
+        key=sort_key,
+    )
+
+
+def object_key(prefix: str, relative_path: Path) -> str:
+    prefix_parts = [part for part in prefix.replace("\\", "/").strip("/").split("/") if part]
+    parts = [*prefix_parts, *relative_path.parts]
+    if any(part in ("", ".", "..") or "\\" in part for part in parts):
+        raise ValueError("object keys must be safe relative paths")
+    return "/".join(parts)
+
+
+def parse_exif_datetime(value: object) -> str | None:
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="ignore").rstrip("\x00")
+    if isinstance(value, str):
+        try:
+            return datetime.strptime(value, "%Y:%m:%d %H:%M:%S").isoformat()
+        except ValueError:
+            return None
+    return None
+
+
 def captured_at(image: Image.Image) -> str | None:
+    raw_exif = image.info.get("exif")
+    if raw_exif:
+        try:
+            exif_dict = piexif.load(raw_exif)
+        except Exception:
+            exif_dict = {}
+
+        for ifd_name, tag in (
+            ("Exif", piexif.ExifIFD.DateTimeOriginal),
+            ("0th", piexif.ImageIFD.DateTime),
+        ):
+            captured = parse_exif_datetime(exif_dict.get(ifd_name, {}).get(tag))
+            if captured:
+                return captured
+
     exif = image.getexif()
     for tag in (36867, 306):
-        value = exif.get(tag)
-        if isinstance(value, str):
-            try:
-                return datetime.strptime(value, "%Y:%m:%d %H:%M:%S").isoformat()
-            except ValueError:
-                continue
+        captured = parse_exif_datetime(exif.get(tag))
+        if captured:
+            return captured
     return None
 
 
@@ -56,31 +93,71 @@ def sanitized_exif_bytes(image: Image.Image, strip_gps: bool) -> bytes | None:
     raw_exif = image.info.get("exif")
     if not raw_exif:
         return None
+
     try:
         exif_dict = piexif.load(raw_exif)
-        exif_dict["0th"].pop(piexif.ImageIFD.Orientation, None)
-        exif_dict["1st"].pop(piexif.ImageIFD.Orientation, None)
-        if strip_gps:
-            exif_dict["GPS"] = {}
-        return piexif.dump(exif_dict)
     except Exception:
         return None
 
+    if strip_gps:
+        exif_dict["GPS"] = {}
+
+    for ifd_name in ("0th", "1st"):
+        exif_dict.get(ifd_name, {}).pop(piexif.ImageIFD.Orientation, None)
+
+    return piexif.dump(exif_dict)
+
 
 def save_full_jpeg(image: Image.Image, output_path: Path, strip_gps: bool) -> None:
-    transposed = ImageOps.exif_transpose(image)
-    rgb = transposed.convert("RGB")
-    exif_bytes = sanitized_exif_bytes(image, strip_gps)
+    normalized = ImageOps.exif_transpose(image).convert("RGB")
     save_kwargs: dict[str, Any] = {"format": "JPEG", "quality": 95, "subsampling": 1}
+    exif_bytes = sanitized_exif_bytes(image, strip_gps)
     if exif_bytes:
         save_kwargs["exif"] = exif_bytes
-    rgb.save(output_path, **save_kwargs)
+    normalized.save(output_path, **save_kwargs)
 
 
 def save_thumbnail(image: Image.Image, output_path: Path) -> None:
-    thumb = ImageOps.exif_transpose(image).convert("RGB")
-    thumb.thumbnail((800, 800), Image.Resampling.LANCZOS)
-    thumb.save(output_path, "WEBP", quality=82, method=6)
+    thumbnail = ImageOps.exif_transpose(image).convert("RGB")
+    thumbnail.thumbnail((800, 800), Image.Resampling.LANCZOS)
+    thumbnail.save(output_path, "WEBP", quality=82, method=6)
+
+
+def write_album_index(index_path: Path, manifest: dict[str, Any]) -> None:
+    if index_path.exists():
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+    else:
+        index = {"version": 1, "generatedAt": "", "albums": []}
+
+    albums = [
+        album
+        for album in index.get("albums", [])
+        if isinstance(album, dict) and album.get("albumId") != manifest["albumId"]
+    ]
+    albums.append(
+        {
+            "albumId": manifest["albumId"],
+            "title": manifest["title"],
+            "createdAt": manifest["createdAt"],
+            "coverPhotoId": manifest["photos"][0]["id"],
+            "photoCount": len(manifest["photos"]),
+        }
+    )
+    albums.sort(key=lambda album: album["createdAt"], reverse=True)
+
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    index_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "generatedAt": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "albums": albums,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def package_album(
@@ -89,102 +166,85 @@ def package_album(
     title: str | None,
     output_dir: Path,
     strip_gps: bool = True,
+    copy_full: bool = False,
+    originals_prefix: str | None = None,
 ) -> dict[str, Any]:
     album_id = safe_album_id(album_id)
     source_dir = source_dir.resolve()
     output_dir = output_dir.resolve()
-    if not source_dir.is_dir():
-        raise ValueError(f"source directory does not exist: {source_dir}")
 
-    image_paths = sorted_images(source_dir)
-    if not image_paths:
+    images = sorted_images(source_dir)
+    if not images:
         raise ValueError(f"no supported images found in {source_dir}")
 
-    albums_dir = output_dir / "albums"
-    album_dir = albums_dir / album_id
-    output_dir.mkdir(parents=True, exist_ok=True)
-    staging_root = Path(tempfile.mkdtemp(prefix=f".{album_id}-", dir=output_dir))
-    staged_album_dir = staging_root / album_id
-    thumbs_dir = staged_album_dir / "thumbs"
-    full_dir = staged_album_dir / "full"
+    album_dir = output_dir / "albums" / album_id
+    thumbs_dir = album_dir / "thumbs"
     thumbs_dir.mkdir(parents=True, exist_ok=True)
-    full_dir.mkdir(parents=True, exist_ok=True)
+    full_dir = album_dir / "full"
+    if copy_full:
+        full_dir.mkdir(parents=True, exist_ok=True)
+
+    existing_originals_prefix = source_dir.name if originals_prefix is None else originals_prefix
 
     photos: list[dict[str, Any]] = []
-    try:
-        for index, image_path in enumerate(image_paths, start=1):
-            photo_id = f"img_{index:03d}"
-            full_name = f"{photo_id}.jpg"
-            thumb_name = f"{photo_id}.webp"
-            with Image.open(image_path) as image:
-                width, height = ImageOps.exif_transpose(image).size
-                save_full_jpeg(image, full_dir / full_name, strip_gps)
-                save_thumbnail(image, thumbs_dir / thumb_name)
-                photo: dict[str, Any] = {
-                    "id": photo_id,
-                    "filename": full_name,
-                    "thumbPath": f"albums/{album_id}/thumbs/{thumb_name}",
-                    "fullPath": f"albums/{album_id}/full/{full_name}",
-                    "width": width,
-                    "height": height,
-                }
-                captured = captured_at(image)
-                if captured:
-                    photo["capturedAt"] = captured
-                photos.append(photo)
+    for index, image_path in enumerate(images, start=1):
+        photo_id = f"img_{index:03d}"
+        thumb_name = f"{photo_id}.webp"
+        relative_image_path = image_path.relative_to(source_dir)
 
-        manifest: dict[str, Any] = {
-            "version": 1,
-            "albumId": album_id,
-            "title": title or title_from_album_id(album_id),
-            "createdAt": date.today().isoformat(),
-            "visibility": "access-controlled",
-            "photos": photos,
-        }
-        (staged_album_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-        albums_dir.mkdir(parents=True, exist_ok=True)
-        if album_dir.exists():
-            shutil.rmtree(album_dir)
-        shutil.move(str(staged_album_dir), album_dir)
-        write_album_index(albums_dir / "index.json", manifest)
-        return manifest
-    finally:
-        shutil.rmtree(staging_root, ignore_errors=True)
+        with Image.open(image_path) as image:
+            width, height = ImageOps.exif_transpose(image).size
+            save_thumbnail(image, thumbs_dir / thumb_name)
+            if copy_full:
+                filename = f"{photo_id}.jpg"
+                full_path = f"albums/{album_id}/full/{filename}"
+                save_full_jpeg(image, full_dir / filename, strip_gps)
+            else:
+                filename = image_path.name
+                full_path = object_key(existing_originals_prefix, relative_image_path)
 
+            photo: dict[str, Any] = {
+                "id": photo_id,
+                "filename": filename,
+                "thumbPath": f"albums/{album_id}/thumbs/{thumb_name}",
+                "fullPath": full_path,
+                "width": width,
+                "height": height,
+            }
+            captured = captured_at(image)
+            if captured:
+                photo["capturedAt"] = captured
+            photos.append(photo)
 
-def write_album_index(index_path: Path, manifest: dict[str, Any]) -> None:
-    if index_path.exists():
-        index = json.loads(index_path.read_text(encoding="utf-8"))
-    else:
-        index = {"version": 1, "generatedAt": datetime.now().astimezone().isoformat(), "albums": []}
+    manifest: dict[str, Any] = {
+        "version": 1,
+        "albumId": album_id,
+        "title": title or title_from_album_id(album_id),
+        "createdAt": date.today().isoformat(),
+        "visibility": "access-controlled",
+        "photos": photos,
+    }
 
-    albums = [album for album in index.get("albums", []) if album.get("albumId") != manifest["albumId"]]
-    cover_photo_id = manifest["photos"][0]["id"] if manifest["photos"] else ""
-    albums.append(
-        {
-            "albumId": manifest["albumId"],
-            "title": manifest["title"],
-            "createdAt": manifest["createdAt"],
-            "coverPhotoId": cover_photo_id,
-            "photoCount": len(manifest["photos"]),
-        }
-    )
-    albums.sort(key=lambda album: album["createdAt"], reverse=True)
-    index["version"] = 1
-    index["generatedAt"] = datetime.now().astimezone().isoformat()
-    index["albums"] = albums
-    index_path.parent.mkdir(parents=True, exist_ok=True)
-    index_path.write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
+    (album_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    write_album_index(output_dir / "albums" / "index.json", manifest)
+    return manifest
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Package a local album for manual B2 upload")
-    parser.add_argument("source", type=Path)
-    parser.add_argument("--album", required=True)
-    parser.add_argument("--title")
-    parser.add_argument("--out", type=Path, default=Path("dist-albums"))
-    parser.add_argument("--keep-gps", action="store_true")
+    parser = argparse.ArgumentParser(description="Package a local photo album for manual B2 upload")
+    parser.add_argument("source", type=Path, help="Directory of source images")
+    parser.add_argument("--album", required=True, help="Album id, for example 2026-family-trip")
+    parser.add_argument("--title", help="Album title; defaults to a title-cased album id")
+    parser.add_argument("--out", type=Path, default=Path("dist-albums"), help="Output directory")
+    parser.add_argument("--copy-full", action="store_true", help="Copy normalized full-size JPEGs into the package")
+    parser.add_argument(
+        "--originals-prefix",
+        help="B2 key prefix for already-synced originals; defaults to the source folder name",
+    )
+    parser.add_argument("--keep-gps", action="store_true", help="Preserve GPS EXIF metadata when --copy-full is used")
     args = parser.parse_args()
+    if args.copy_full and args.originals_prefix is not None:
+        parser.error("--originals-prefix cannot be used with --copy-full")
 
     manifest = package_album(
         source_dir=args.source,
@@ -192,6 +252,8 @@ def main() -> None:
         title=args.title,
         output_dir=args.out,
         strip_gps=not args.keep_gps,
+        copy_full=args.copy_full,
+        originals_prefix=args.originals_prefix,
     )
     print(json.dumps({"albumId": manifest["albumId"], "photos": len(manifest["photos"])}, indent=2))
 

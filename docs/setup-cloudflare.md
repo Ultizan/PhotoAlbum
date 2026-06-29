@@ -3,69 +3,87 @@
 ## Worker
 
 - Worker name: `photoalbum`
-- Production URL: `https://photoalbum.ultizan.workers.dev`
-- Preview URL pattern: `https://*-photoalbum.ultizan.workers.dev`
-
-## Builds And Deploys
-
-Configure these Cloudflare Workers Builds fields:
-
+- Production URL: `photoalbum.ultizan.workers.dev`
+- Preview URL pattern: `*-photoalbum.ultizan.workers.dev`
 - Build command: `npm run build`
 - Deploy command: `npx wrangler deploy`
 
-Alternative single-command setup:
+This repo uses the Cloudflare Vite plugin. After `npm run build`, Wrangler redirects deployment to the generated config at `dist/client/photoalbum/wrangler.json` and serves static assets from `dist/client/client`.
 
-- Build command: leave empty
-- Deploy command: `npm run deploy`
+`wrangler.jsonc` intentionally does not contain deployment values for B2 or Access. It sets `keep_vars: true`, so Worker variables managed in the Cloudflare dashboard are not deleted or replaced by local placeholder values during deploy.
 
-Use one of those patterns, not both, to avoid double-building.
+## Worker Secrets
 
-Important troubleshooting note: if Cloudflare logs this error:
+Set these as Worker secrets:
 
-```text
-assets.directory ... /opt/buildhome/repo/dist/client does not exist
+```bash
+npx wrangler secret put B2_KEY_ID
+npx wrangler secret put B2_APPLICATION_KEY
+npx wrangler secret put SHARE_TOKEN_SECRET
 ```
 
-Wrangler is running before the build creates `dist/client`. Configure Worker Builds to run `npm run build` before deploy, or use `npm run deploy` where appropriate.
+## Worker Variables
 
-## Secrets
+Set these Worker variables in Cloudflare:
 
-Set these as Cloudflare Worker secrets:
+```text
+B2_BUCKET_NAME
+B2_ENDPOINT
+B2_REGION
+ACCESS_AUD
+ACCESS_ISSUER
+```
 
-- `B2_KEY_ID`
-- `B2_APPLICATION_KEY`
-- `SHARE_TOKEN_SECRET`
+`ACCESS_ISSUER` should look like:
 
-## Variables
-
-Set these as Cloudflare Worker variables:
-
-- `B2_BUCKET_NAME`
-- `B2_ENDPOINT`
-- `B2_REGION`
-- `ACCESS_AUD`
-- `ACCESS_ISSUER`
+```text
+https://your-team.cloudflareaccess.com
+```
 
 ## Cloudflare Access
 
-Protect private application paths:
+Protect the private application paths:
 
-- `/`
-- `/albums`
-- `/albums/*`
-- `/api/*`
-- `/img/*`
+```text
+/
+/albums
+/albums/*
+/api/*
+/img/*
+```
 
 Do not protect share-link paths:
 
-- `/share/*`
-- `/share-api/*`
-- `/share-img/*`
+```text
+/share/*
+/share-api/*
+/share-img/*
+```
+
+For family use, a one-time PIN policy with explicit email addresses is enough. Deny everyone else.
+
+## Backblaze B2
+
+Use a private bucket with S3-compatible access enabled. The B2 application key should be limited to the photo bucket.
+
+Expected object layout:
+
+```text
+albums/
+  index.json
+  2026-family-trip/
+    manifest.json
+    thumbs/
+      img_001.webp
+    full/
+      img_001.jpg
+```
 
 ## Smoke Tests
 
 After deployment:
 
-1. Open the production root and confirm Cloudflare Access login is required.
-2. Generate a `/share/<token>` URL and confirm it works in a private browser without Access login.
-3. Open images from the gallery and share pages, and confirm requests use `/img/` or `/share-img/` and never expose Backblaze B2 URLs.
+- Visit `https://photoalbum.ultizan.workers.dev/` and confirm Cloudflare Access login appears.
+- Visit a generated `/share/<token>` URL in a private browser and confirm it reaches the app without Access login.
+- Confirm image requests use `/img/` or `/share-img/` app URLs, not B2 URLs.
+- Confirm an expired share token returns `403` from `/share-api/<token>/album`.

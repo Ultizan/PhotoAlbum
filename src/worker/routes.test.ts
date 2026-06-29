@@ -7,6 +7,7 @@ type TestEnv = Env & {
   TEST_B2_INDEX_JSON?: string;
   TEST_B2_MANIFEST_JSON?: string;
   TEST_B2_OBJECT_BODY?: string;
+  TEST_B2_ECHO_OBJECT_PATH?: string;
   TEST_B2_OBJECT_STATUS?: number;
 };
 
@@ -136,6 +137,32 @@ describe("worker routes", () => {
     await expect(response.text()).resolves.toBe("thumb-body");
   });
 
+  it("proxies private full-size images from existing synced original keys", async () => {
+    const syncedOriginalManifest = {
+      ...albumManifest,
+      photos: [
+        {
+          ...albumManifest.photos[0],
+          filename: "3W7A1320.JPG",
+          fullPath: "50thCelebration/2026_06_26/3W7A1320.JPG"
+        }
+      ]
+    };
+
+    const response = await worker.fetch(
+      accessRequest("https://example.com/img/summer-2025/full/img_001"),
+      env({
+        DEV_AUTH_BYPASS: "true",
+        TEST_B2_MANIFEST_JSON: JSON.stringify(syncedOriginalManifest),
+        TEST_B2_ECHO_OBJECT_PATH: "true"
+      }),
+      {} as ExecutionContext
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("/bucket/50thCelebration/2026_06_26/3W7A1320.JPG");
+  });
+
   it("returns a share album manifest for a valid token", async () => {
     const token = await createShareToken(
       { v: 1, albumId: "summer-2025", expiresAt: "2999-01-01T00:00:00.000Z" },
@@ -151,11 +178,11 @@ describe("worker routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBe("private, max-age=60");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
     await expect(response.json()).resolves.toEqual(albumManifest);
   });
 
-  it("proxies shared full-size images for a valid token", async () => {
+  it("proxies shared full-size images for a valid token without browser caching", async () => {
     const token = await createShareToken(
       { v: 1, albumId: "summer-2025", expiresAt: "2999-01-01T00:00:00.000Z" },
       "secret"
@@ -171,9 +198,29 @@ describe("worker routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBe("private, max-age=0");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(response.headers.get("content-type")).toBe("image/jpeg");
     await expect(response.text()).resolves.toBe("full-body");
+  });
+
+  it("proxies shared thumbnails for a valid token without browser caching", async () => {
+    const token = await createShareToken(
+      { v: 1, albumId: "summer-2025", expiresAt: "2999-01-01T00:00:00.000Z" },
+      "secret"
+    );
+
+    const response = await worker.fetch(
+      new Request(`https://example.com/share-img/${token}/thumb/img_001`),
+      env({
+        TEST_B2_MANIFEST_JSON: JSON.stringify(albumManifest),
+        TEST_B2_OBJECT_BODY: "thumb-body"
+      }),
+      {} as ExecutionContext
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    await expect(response.text()).resolves.toBe("thumb-body");
   });
 
   it("returns forbidden when a shared image object cannot be fetched from B2", async () => {

@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "preview": "vite preview --host 0.0.0.0",
-    "build": "tsc -b && vite build",
+    "check:config": "node tools/check_config.mjs",
+    "build": "npm run check:config && tsc -b && vite build",
     "test": "vitest run",
     "test:watch": "vitest",
     "share-link": "node tools/create_share_link.mjs",
