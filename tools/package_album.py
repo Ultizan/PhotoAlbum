@@ -20,6 +20,7 @@ except Exception:
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
 ALBUM_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+DEFAULT_DISPLAY_LONG_EDGE = 3000
 
 
 def title_from_album_id(album_id: str) -> str:
@@ -123,6 +124,14 @@ def save_thumbnail(image: Image.Image, output_path: Path) -> None:
     thumbnail.save(output_path, "WEBP", quality=82, method=6)
 
 
+def save_display_image(image: Image.Image, output_path: Path, long_edge: int) -> None:
+    if long_edge <= 0:
+        raise ValueError("display long edge must be positive")
+    display = ImageOps.exif_transpose(image).convert("RGB")
+    display.thumbnail((long_edge, long_edge), Image.Resampling.LANCZOS)
+    display.save(output_path, "WEBP", quality=86, method=6)
+
+
 def write_album_index(index_path: Path, manifest: dict[str, Any]) -> None:
     if index_path.exists():
         index = json.loads(index_path.read_text(encoding="utf-8"))
@@ -168,7 +177,12 @@ def package_album(
     strip_gps: bool = True,
     copy_full: bool = False,
     originals_prefix: str | None = None,
+    display_long_edge: int = DEFAULT_DISPLAY_LONG_EDGE,
+    display_only: bool = False,
 ) -> dict[str, Any]:
+    if copy_full and display_only:
+        raise ValueError("display-only mode cannot copy full-size files")
+
     album_id = safe_album_id(album_id)
     source_dir = source_dir.resolve()
     output_dir = output_dir.resolve()
@@ -179,22 +193,38 @@ def package_album(
 
     album_dir = output_dir / "albums" / album_id
     thumbs_dir = album_dir / "thumbs"
-    thumbs_dir.mkdir(parents=True, exist_ok=True)
+    display_dir = album_dir / "display"
+    if not display_only:
+        thumbs_dir.mkdir(parents=True, exist_ok=True)
+    display_dir.mkdir(parents=True, exist_ok=True)
     full_dir = album_dir / "full"
     if copy_full:
         full_dir.mkdir(parents=True, exist_ok=True)
 
     existing_originals_prefix = source_dir.name if originals_prefix is None else originals_prefix
+    existing_manifest_path = album_dir / "manifest.json"
+    existing_manifest: dict[str, Any] = {}
+    existing_photos_by_id: dict[str, dict[str, Any]] = {}
+    if display_only and existing_manifest_path.exists():
+        existing_manifest = json.loads(existing_manifest_path.read_text(encoding="utf-8"))
+        existing_photos_by_id = {
+            photo["id"]: photo
+            for photo in existing_manifest.get("photos", [])
+            if isinstance(photo, dict) and isinstance(photo.get("id"), str)
+        }
 
     photos: list[dict[str, Any]] = []
     for index, image_path in enumerate(images, start=1):
         photo_id = f"img_{index:03d}"
         thumb_name = f"{photo_id}.webp"
+        display_name = f"{photo_id}.webp"
         relative_image_path = image_path.relative_to(source_dir)
 
         with Image.open(image_path) as image:
             width, height = ImageOps.exif_transpose(image).size
-            save_thumbnail(image, thumbs_dir / thumb_name)
+            if not display_only:
+                save_thumbnail(image, thumbs_dir / thumb_name)
+            save_display_image(image, display_dir / display_name, display_long_edge)
             if copy_full:
                 filename = f"{photo_id}.jpg"
                 full_path = f"albums/{album_id}/full/{filename}"
@@ -207,6 +237,7 @@ def package_album(
                 "id": photo_id,
                 "filename": filename,
                 "thumbPath": f"albums/{album_id}/thumbs/{thumb_name}",
+                "displayPath": f"albums/{album_id}/display/{display_name}",
                 "fullPath": full_path,
                 "width": width,
                 "height": height,
@@ -214,13 +245,20 @@ def package_album(
             captured = captured_at(image)
             if captured:
                 photo["capturedAt"] = captured
+            existing_photo = existing_photos_by_id.get(photo_id)
+            if display_only and existing_photo:
+                photo = {
+                    **existing_photo,
+                    "id": photo_id,
+                    "displayPath": f"albums/{album_id}/display/{display_name}",
+                }
             photos.append(photo)
 
     manifest: dict[str, Any] = {
         "version": 1,
         "albumId": album_id,
-        "title": title or title_from_album_id(album_id),
-        "createdAt": date.today().isoformat(),
+        "title": title or existing_manifest.get("title") or title_from_album_id(album_id),
+        "createdAt": existing_manifest.get("createdAt") or date.today().isoformat(),
         "visibility": "access-controlled",
         "photos": photos,
     }
@@ -238,6 +276,17 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=Path("dist-albums"), help="Output directory")
     parser.add_argument("--copy-full", action="store_true", help="Copy normalized full-size JPEGs into the package")
     parser.add_argument(
+        "--display-only",
+        action="store_true",
+        help="Backfill display images and manifest display paths without regenerating thumbnails or full-size files",
+    )
+    parser.add_argument(
+        "--display-long-edge",
+        type=int,
+        default=DEFAULT_DISPLAY_LONG_EDGE,
+        help=f"Maximum width or height for generated display images; defaults to {DEFAULT_DISPLAY_LONG_EDGE}",
+    )
+    parser.add_argument(
         "--originals-prefix",
         help="B2 key prefix for already-synced originals; defaults to the source folder name",
     )
@@ -245,6 +294,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.copy_full and args.originals_prefix is not None:
         parser.error("--originals-prefix cannot be used with --copy-full")
+    if args.copy_full and args.display_only:
+        parser.error("--display-only cannot be used with --copy-full")
 
     manifest = package_album(
         source_dir=args.source,
@@ -254,6 +305,8 @@ def main() -> None:
         strip_gps=not args.keep_gps,
         copy_full=args.copy_full,
         originals_prefix=args.originals_prefix,
+        display_long_edge=args.display_long_edge,
+        display_only=args.display_only,
     )
     print(json.dumps({"albumId": manifest["albumId"], "photos": len(manifest["photos"])}, indent=2))
 

@@ -12,6 +12,7 @@ const photo = {
   id: "img_001",
   filename: "img_001.jpg",
   thumbPath: "albums/family-trip/thumbs/img_001.webp",
+  displayPath: "albums/family-trip/display/img_001.webp",
   fullPath: "albums/family-trip/full/img_001.jpg",
   width: 1600,
   height: 1200
@@ -55,6 +56,7 @@ describe("Lightbox", () => {
     const image = screen.getByRole("img", { name: "img_001.jpg" });
 
     expect(zoomButton).toContainElement(image);
+    expect(image).toHaveAttribute("src", "/img/family-trip/display/img_001");
     expect(zoomButton).toHaveClass("min-h-0");
     expect(zoomButton).toHaveClass("min-w-0");
     expect(image).toHaveClass("h-full");
@@ -83,11 +85,27 @@ describe("Lightbox", () => {
 
     expect(screen.getByRole("button", { name: "Fit to screen" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "img_001.jpg" })).toHaveClass("max-w-none");
+    expect(screen.getByRole("img", { name: "img_001.jpg" })).toHaveAttribute("src", "/img/family-trip/full/img_001");
 
     await userEvent.click(screen.getByRole("button", { name: "Fit to screen" }));
 
     expect(screen.getByRole("button", { name: "Zoom to full size" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "img_001.jpg" })).toHaveClass("w-full");
+    expect(screen.getByRole("img", { name: "img_001.jpg" })).toHaveAttribute("src", "/img/family-trip/display/img_001");
+  });
+
+  it("falls back to the full route for fit mode when a manifest has no display image", () => {
+    const { displayPath: _displayPath, ...legacyPhoto } = photo;
+
+    render(<Lightbox albumId="family-trip" photo={legacyPhoto} onClose={vi.fn()} />);
+
+    expect(screen.getByRole("img", { name: "img_001.jpg" })).toHaveAttribute("src", "/img/family-trip/full/img_001");
+  });
+
+  it("uses share display image routes for shared fit images", () => {
+    render(<Lightbox albumId="family-trip" photo={photo} shareToken="sample-token" onClose={vi.fn()} />);
+
+    expect(screen.getByRole("img", { name: "img_001.jpg" })).toHaveAttribute("src", "/share-img/sample-token/display/img_001");
   });
 
   it("pinch zooms the fitted image", () => {

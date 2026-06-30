@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
+import type { AlbumManifest } from "./types";
 import { parseAlbumIndex, parseAlbumManifest } from "./validation";
 
 describe("manifest validation", () => {
-  function validAlbumManifest() {
+  function validAlbumManifest(): AlbumManifest {
     return {
       version: 1,
       albumId: "2026-family-trip",
@@ -14,6 +15,7 @@ describe("manifest validation", () => {
           id: "img_001",
           filename: "img_001.jpg",
           thumbPath: "albums/2026-family-trip/thumbs/img_001.webp",
+          displayPath: "albums/2026-family-trip/display/img_001.webp",
           fullPath: "albums/2026-family-trip/full/img_001.jpg",
           width: 6000,
           height: 4000,
@@ -45,6 +47,15 @@ describe("manifest validation", () => {
     const manifest = parseAlbumManifest(validAlbumManifest());
 
     expect(manifest.photos[0].capturedAt).toBe("2026-06-20T19:34:00");
+    expect(manifest.photos[0].displayPath).toBe("albums/2026-family-trip/display/img_001.webp");
+  });
+
+  it("accepts legacy manifests without display images", () => {
+    const manifest = validAlbumManifest();
+    const { displayPath: _displayPath, ...legacyPhoto } = manifest.photos[0];
+    manifest.photos[0] = legacyPhoto;
+
+    expect(parseAlbumManifest(manifest).photos[0].displayPath).toBeUndefined();
   });
 
   it("accepts a manifest that points full-size images at existing synced originals", () => {
@@ -71,6 +82,7 @@ describe("manifest validation", () => {
             id: "img_001",
             filename: "img_001.jpg",
             thumbPath: "albums/other/thumbs/img_001.webp",
+            displayPath: "albums/2026-family-trip/display/img_001.webp",
             fullPath: "albums/2026-family-trip/full/img_001.jpg",
             width: 6000,
             height: 4000,
@@ -98,6 +110,15 @@ describe("manifest validation", () => {
 
     expect(() => parseAlbumManifest(manifest)).toThrow(
       "thumbPath must be the canonical thumbnail path for img_001"
+    );
+  });
+
+  it("rejects a non-canonical display image path", () => {
+    const manifest = validAlbumManifest();
+    manifest.photos[0].displayPath = "albums/2026-family-trip/display/../img_001.webp";
+
+    expect(() => parseAlbumManifest(manifest)).toThrow(
+      "displayPath must be the canonical display path for img_001"
     );
   });
 

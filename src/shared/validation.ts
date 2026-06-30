@@ -106,6 +106,8 @@ function parsePhoto(value: unknown, albumId: string): PhotoManifestItem {
 
   const thumbPrefix = `albums/${albumId}/thumbs/`;
   const expectedThumbPath = `${thumbPrefix}${id}.webp`;
+  const displayPrefix = `albums/${albumId}/display/`;
+  const expectedDisplayPath = `${displayPrefix}${id}.webp`;
   const thumbPath = requireString(value, "thumbPath");
   const fullPath = requireString(value, "fullPath");
   if (!thumbPath.startsWith(thumbPrefix)) {
@@ -114,6 +116,18 @@ function parsePhoto(value: unknown, albumId: string): PhotoManifestItem {
   if (thumbPath !== expectedThumbPath) {
     throw new Error(`thumbPath must be the canonical thumbnail path for ${id}`);
   }
+  const displayPath = value.displayPath;
+  if (displayPath !== undefined) {
+    if (typeof displayPath !== "string" || displayPath.length === 0) {
+      throw new Error("displayPath must be a non-empty string when provided");
+    }
+    if (!displayPath.startsWith(displayPrefix)) {
+      throw new Error(`displayPath must stay within ${displayPrefix}`);
+    }
+    if (displayPath !== expectedDisplayPath) {
+      throw new Error(`displayPath must be the canonical display path for ${id}`);
+    }
+  }
   validateObjectKey(fullPath, "fullPath");
 
   const capturedAt = value.capturedAt;
@@ -121,6 +135,7 @@ function parsePhoto(value: unknown, albumId: string): PhotoManifestItem {
     id,
     filename,
     thumbPath,
+    ...(displayPath !== undefined ? { displayPath } : {}),
     fullPath,
     width: requireNumber(value, "width"),
     height: requireNumber(value, "height"),

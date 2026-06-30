@@ -36,6 +36,7 @@ const albumManifest = {
       id: "img_001",
       filename: "img_001.jpg",
       thumbPath: "albums/summer-2025/thumbs/img_001.webp",
+      displayPath: "albums/summer-2025/display/img_001.webp",
       fullPath: "albums/summer-2025/full/img_001.jpg",
       width: 1600,
       height: 1200,
@@ -137,6 +138,22 @@ describe("worker routes", () => {
     await expect(response.text()).resolves.toBe("thumb-body");
   });
 
+  it("proxies private display images for Access users", async () => {
+    const response = await worker.fetch(
+      accessRequest("https://example.com/img/summer-2025/display/img_001"),
+      env({
+        DEV_AUTH_BYPASS: "true",
+        TEST_B2_MANIFEST_JSON: JSON.stringify(albumManifest),
+        TEST_B2_ECHO_OBJECT_PATH: "true"
+      }),
+      {} as ExecutionContext
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, max-age=86400");
+    await expect(response.text()).resolves.toBe("/bucket/albums/summer-2025/display/img_001.webp");
+  });
+
   it("proxies private full-size images from existing synced original keys", async () => {
     const syncedOriginalManifest = {
       ...albumManifest,
@@ -221,6 +238,26 @@ describe("worker routes", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     await expect(response.text()).resolves.toBe("thumb-body");
+  });
+
+  it("proxies shared display images for a valid token without browser caching", async () => {
+    const token = await createShareToken(
+      { v: 1, albumId: "summer-2025", expiresAt: "2999-01-01T00:00:00.000Z" },
+      "secret"
+    );
+
+    const response = await worker.fetch(
+      new Request(`https://example.com/share-img/${token}/display/img_001`),
+      env({
+        TEST_B2_MANIFEST_JSON: JSON.stringify(albumManifest),
+        TEST_B2_ECHO_OBJECT_PATH: "true"
+      }),
+      {} as ExecutionContext
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    await expect(response.text()).resolves.toBe("/bucket/albums/summer-2025/display/img_001.webp");
   });
 
   it("returns forbidden when a shared image object cannot be fetched from B2", async () => {

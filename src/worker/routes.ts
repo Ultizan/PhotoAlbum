@@ -5,7 +5,7 @@ import { fetchAlbumIndexFromB2, fetchAlbumManifestFromB2, fetchObjectFromB2 } fr
 import type { RequestContext } from "./env";
 import { errorResponse, jsonResponse, withCacheHeaders } from "./http";
 
-type ImageKind = "thumb" | "full";
+type ImageKind = "thumb" | "display" | "full";
 
 type TestableEnv = RequestContext["env"] & {
   TEST_B2_INDEX_JSON?: string;
@@ -60,7 +60,13 @@ function imageKey(manifest: AlbumManifest, photoId: string, kind: ImageKind): st
   if (!photo) {
     return undefined;
   }
-  return kind === "thumb" ? photo.thumbPath : photo.fullPath;
+  if (kind === "thumb") {
+    return photo.thumbPath;
+  }
+  if (kind === "display") {
+    return photo.displayPath ?? photo.fullPath;
+  }
+  return photo.fullPath;
 }
 
 function safeDecodePathSegment(value: string): string | undefined {
@@ -81,7 +87,7 @@ function parsePrivateAlbumPath(pathname: string): { albumId: string } | undefine
 }
 
 function parsePrivateImagePath(pathname: string): { albumId: string; kind: ImageKind; photoId: string } | undefined {
-  const match = /^\/img\/([^/]+)\/(thumb|full)\/([^/]+)$/.exec(pathname);
+  const match = /^\/img\/([^/]+)\/(thumb|display|full)\/([^/]+)$/.exec(pathname);
   if (!match) {
     return undefined;
   }
@@ -106,7 +112,7 @@ function parseShareAlbumPath(pathname: string): { token: string } | undefined {
 }
 
 function parseShareImagePath(pathname: string): { token: string; kind: ImageKind; photoId: string } | undefined {
-  const match = /^\/share-img\/([^/]+)\/(thumb|full)\/([^/]+)$/.exec(pathname);
+  const match = /^\/share-img\/([^/]+)\/(thumb|display|full)\/([^/]+)$/.exec(pathname);
   if (!match) {
     return undefined;
   }
@@ -123,7 +129,7 @@ function parseShareImagePath(pathname: string): { token: string; kind: ImageKind
 }
 
 function imageCacheControl(kind: ImageKind): string {
-  return kind === "thumb" ? "private, max-age=86400" : "private, max-age=0";
+  return kind === "full" ? "private, max-age=0" : "private, max-age=86400";
 }
 
 function shareCacheControl(): string {

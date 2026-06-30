@@ -16,6 +16,7 @@ export type PhotoManifestItem = {
   id: string;
   filename: string;
   thumbPath: string;
+  displayPath?: string;
   fullPath: string;
   width: number;
   height: number;

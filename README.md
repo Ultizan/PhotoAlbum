@@ -33,7 +33,7 @@ uv run --managed-python --with-requirements tools/requirements.txt pytest tools/
 
 ## Package An Album
 
-By default this creates `manifest.json`, `albums/index.json`, and thumbnails only. Full-size originals are expected to already exist in B2 under keys that match the source folder name and relative file paths.
+By default this creates `manifest.json`, `albums/index.json`, thumbnails, and display-sized WebP images. Full-size originals are expected to already exist in B2 under keys that match the source folder name and relative file paths.
 
 ```bash
 python --version
@@ -49,7 +49,7 @@ uv run --managed-python --with-requirements tools/requirements.txt python tools/
 
 For a synced folder named `50thCelebration`, a file such as `50thCelebration/2026_06_26/3W7A1320.JPG` is referenced directly by the manifest. Use `--originals-prefix` if your B2 sync uses a different object-key prefix.
 
-Upload the generated `dist-albums/albums/` contents into the private B2 bucket under the same `albums/` prefix. Use `--copy-full` only when you want the tool to create normalized full-size JPEG copies.
+Upload the generated `dist-albums/albums/` contents into the private B2 bucket under the same `albums/` prefix. Use `--display-long-edge` to change the default 3000px display-image cap. Use `--display-only` to backfill display images and update manifests for an existing album without regenerating thumbnails or full-size files. Use `--copy-full` only when you want the tool to create normalized full-size JPEG copies.
 
 ## Generate A Share Link
 

@@ -20,6 +20,7 @@ const album: AlbumManifest = {
       id: "img_001",
       filename: "img_001.jpg",
       thumbPath: "albums/family-trip/thumbs/img_001.webp",
+      displayPath: "albums/family-trip/display/img_001.webp",
       fullPath: "albums/family-trip/full/img_001.jpg",
       width: 1600,
       height: 1200
@@ -28,6 +29,7 @@ const album: AlbumManifest = {
       id: "img_002",
       filename: "img_002.jpg",
       thumbPath: "albums/family-trip/thumbs/img_002.webp",
+      displayPath: "albums/family-trip/display/img_002.webp",
       fullPath: "albums/family-trip/full/img_002.jpg",
       width: 1600,
       height: 1200
@@ -92,7 +94,7 @@ describe("AlbumGrid", () => {
 
     const dialog = screen.getByRole("dialog", { name: "img_002.jpg" });
     expect(dialog).toBeInTheDocument();
-    expect(within(dialog).getByRole("img", { name: "img_002.jpg" })).toHaveAttribute("src", "/img/family-trip/full/img_002");
+    expect(within(dialog).getByRole("img", { name: "img_002.jpg" })).toHaveAttribute("src", "/img/family-trip/display/img_002");
 
     await userEvent.click(screen.getByRole("button", { name: "Previous photo" }));
 

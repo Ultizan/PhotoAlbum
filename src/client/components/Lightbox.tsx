@@ -68,9 +68,15 @@ export function Lightbox({
   const isPinchZoomed = pinchScale > 1;
   const isZoomed = isActualSize || isPinchZoomed;
   const zoomSurfaceSize = `${pinchScale * 100}%`;
-  const imageUrl = shareToken
+  const fullImageUrl = shareToken
     ? `/share-img/${encodeURIComponent(shareToken)}/full/${encodeURIComponent(photo.id)}`
     : `/img/${encodeURIComponent(albumId)}/full/${encodeURIComponent(photo.id)}`;
+  const displayImageUrl = photo.displayPath
+    ? shareToken
+      ? `/share-img/${encodeURIComponent(shareToken)}/display/${encodeURIComponent(photo.id)}`
+      : `/img/${encodeURIComponent(albumId)}/display/${encodeURIComponent(photo.id)}`
+    : fullImageUrl;
+  const visibleImageUrl = isActualSize ? fullImageUrl : displayImageUrl;
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -117,7 +123,7 @@ export function Lightbox({
     setIsDownloading(true);
     setDownloadError(null);
     try {
-      await downloadSequentially([{ url: imageUrl, filename: photo.filename }], 0);
+      await downloadSequentially([{ url: fullImageUrl, filename: photo.filename }], 0);
     } catch (error) {
       setDownloadError(error instanceof Error ? error.message : "Download failed");
     } finally {
@@ -297,7 +303,7 @@ export function Lightbox({
         >
           <img
             className={isActualSize ? "block max-h-none max-w-none object-contain" : "block h-full w-full min-h-0 min-w-0 max-h-full max-w-full object-contain"}
-            src={imageUrl}
+            src={visibleImageUrl}
             alt={photo.filename}
           />
         </button>
