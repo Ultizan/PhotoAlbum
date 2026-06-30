@@ -99,6 +99,19 @@ describe("AlbumGrid", () => {
     expect(screen.getByRole("dialog", { name: "img_001.jpg" })).toBeInTheDocument();
   });
 
+  it("resets the lightbox image to fit when navigating", async () => {
+    render(<AlbumGrid album={album} />);
+
+    await userEvent.click(screen.getByRole("img", { name: "img_001.jpg" }));
+    await userEvent.click(screen.getByRole("button", { name: "Zoom to full size" }));
+    expect(screen.getByRole("button", { name: "Fit to screen" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Next photo" }));
+
+    expect(screen.getByRole("dialog", { name: "img_002.jpg" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Zoom to full size" })).toBeInTheDocument();
+  });
+
   it("shows a download error when the selected-download queue fails", async () => {
     vi.mocked(downloadSequentially).mockRejectedValue(new Error("Download failed for img_001.jpg: HTTP 403"));
 

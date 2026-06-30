@@ -29,6 +29,7 @@ export function Lightbox({
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [isZoomed, setIsZoomed] = useState(false);
   const imageUrl = shareToken
     ? `/share-img/${encodeURIComponent(shareToken)}/full/${encodeURIComponent(photo.id)}`
     : `/img/${encodeURIComponent(albumId)}/full/${encodeURIComponent(photo.id)}`;
@@ -43,6 +44,10 @@ export function Lightbox({
       }
     };
   }, []);
+
+  useEffect(() => {
+    setIsZoomed(false);
+  }, [photo.id]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -100,7 +105,7 @@ export function Lightbox({
           {isSelected ? "Remove from selection" : "Add to selection"}
         </button>
       </div>
-      <div className="relative grid min-h-0 place-items-center">
+      <div className={`relative min-h-0 ${isZoomed ? "overflow-auto" : "grid place-items-center overflow-hidden"}`}>
         <button
           className="absolute left-0 top-1/2 z-10 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/95 text-slate-950 disabled:cursor-not-allowed disabled:opacity-30"
           type="button"
@@ -110,7 +115,22 @@ export function Lightbox({
         >
           <ChevronLeft size={24} />
         </button>
-        <img className="max-h-full max-w-full object-contain" src={imageUrl} alt={photo.filename} />
+        <button
+          className={
+            isZoomed
+              ? "block min-h-full min-w-full cursor-zoom-out border-0 bg-transparent p-0"
+              : "grid h-full w-full cursor-zoom-in place-items-center border-0 bg-transparent p-0"
+          }
+          type="button"
+          onClick={() => setIsZoomed((value) => !value)}
+          aria-label={isZoomed ? "Fit to screen" : "Zoom to full size"}
+        >
+          <img
+            className={isZoomed ? "block max-h-none max-w-none object-contain" : "block max-h-full max-w-full object-contain"}
+            src={imageUrl}
+            alt={photo.filename}
+          />
+        </button>
         <button
           className="absolute right-0 top-1/2 z-10 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/95 text-slate-950 disabled:cursor-not-allowed disabled:opacity-30"
           type="button"

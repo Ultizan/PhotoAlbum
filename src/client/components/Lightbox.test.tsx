@@ -47,4 +47,30 @@ describe("Lightbox", () => {
       0
     );
   });
+
+  it("fits the image to the viewport by default", () => {
+    render(<Lightbox albumId="family-trip" photo={photo} onClose={vi.fn()} />);
+
+    const zoomButton = screen.getByRole("button", { name: "Zoom to full size" });
+    const image = screen.getByRole("img", { name: "img_001.jpg" });
+
+    expect(zoomButton).toContainElement(image);
+    expect(image).toHaveClass("max-h-full");
+    expect(image).toHaveClass("max-w-full");
+    expect(image).toHaveClass("object-contain");
+  });
+
+  it("toggles between fit and full-size image views", async () => {
+    render(<Lightbox albumId="family-trip" photo={photo} onClose={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Zoom to full size" }));
+
+    expect(screen.getByRole("button", { name: "Fit to screen" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "img_001.jpg" })).toHaveClass("max-w-none");
+
+    await userEvent.click(screen.getByRole("button", { name: "Fit to screen" }));
+
+    expect(screen.getByRole("button", { name: "Zoom to full size" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "img_001.jpg" })).toHaveClass("max-w-full");
+  });
 });
