@@ -10,6 +10,14 @@ type PointerPoint = {
   y: number;
 };
 
+type PanStart = {
+  pointerId: number;
+  x: number;
+  y: number;
+  scrollLeft: number;
+  scrollTop: number;
+};
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
@@ -47,8 +55,10 @@ export function Lightbox({
   onClose: () => void;
 }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const activePointersRef = useRef<Map<number, PointerPoint>>(new Map());
   const pinchStartRef = useRef<{ distance: number; scale: number } | null>(null);
+  const panStartRef = useRef<PanStart | null>(null);
   const suppressNextClickRef = useRef(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -76,6 +86,7 @@ export function Lightbox({
   useEffect(() => {
     activePointersRef.current.clear();
     pinchStartRef.current = null;
+    panStartRef.current = null;
     suppressNextClickRef.current = false;
     setZoomMode("fit");
     setPinchScale(1);
@@ -117,6 +128,7 @@ export function Lightbox({
   function resetZoom() {
     activePointersRef.current.clear();
     pinchStartRef.current = null;
+    panStartRef.current = null;
     suppressNextClickRef.current = false;
     setZoomMode("fit");
     setPinchScale(1);
@@ -145,6 +157,27 @@ export function Lightbox({
     pinchStartRef.current = { distance, scale: pinchScale };
   }
 
+  function startPanIfReady() {
+    if (!isZoomed || activePointersRef.current.size !== 1 || !viewportRef.current) {
+      panStartRef.current = null;
+      return;
+    }
+
+    const [[pointerId, point]] = Array.from(activePointersRef.current.entries());
+    if (!point) {
+      panStartRef.current = null;
+      return;
+    }
+
+    panStartRef.current = {
+      pointerId,
+      x: point.x,
+      y: point.y,
+      scrollLeft: viewportRef.current.scrollLeft,
+      scrollTop: viewportRef.current.scrollTop
+    };
+  }
+
   function handleImagePointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
     if (event.pointerType !== "touch") {
       return;
@@ -154,8 +187,11 @@ export function Lightbox({
     activePointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
     if (activePointersRef.current.size === 2) {
+      panStartRef.current = null;
       setZoomMode("fit");
       startPinchIfReady();
+    } else if (activePointersRef.current.size === 1) {
+      startPanIfReady();
     }
   }
 
@@ -166,6 +202,11 @@ export function Lightbox({
 
     activePointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (activePointersRef.current.size < 2) {
+      if (panStartRef.current?.pointerId === event.pointerId && viewportRef.current) {
+        event.preventDefault();
+        viewportRef.current.scrollLeft = panStartRef.current.scrollLeft + panStartRef.current.x - event.clientX;
+        viewportRef.current.scrollTop = panStartRef.current.scrollTop + panStartRef.current.y - event.clientY;
+      }
       return;
     }
 
@@ -199,6 +240,7 @@ export function Lightbox({
     if (activePointersRef.current.size < 2) {
       pinchStartRef.current = null;
       setPinchScale((scale) => (scale < 1.02 ? 1 : scale));
+      startPanIfReady();
     }
   }
 
@@ -225,7 +267,10 @@ export function Lightbox({
           {isSelected ? "Remove from selection" : "Add to selection"}
         </button>
       </div>
-      <div className={`relative min-h-0 ${isZoomed ? "overflow-auto" : "grid place-items-center overflow-hidden"}`}>
+      <div
+        ref={viewportRef}
+        className={`relative min-h-0 min-w-0 ${isZoomed ? "overflow-auto" : "grid place-items-center overflow-hidden"}`}
+      >
         <button
           className="absolute left-0 top-1/2 z-10 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/95 text-slate-950 disabled:cursor-not-allowed disabled:opacity-30"
           type="button"
@@ -239,9 +284,9 @@ export function Lightbox({
           className={
             isActualSize
               ? "block min-h-full min-w-full cursor-zoom-out border-0 bg-transparent p-0"
-              : `grid h-full w-full ${isZoomed ? "cursor-zoom-out" : "cursor-zoom-in"} place-items-center border-0 bg-transparent p-0`
+              : `grid h-full w-full min-h-0 min-w-0 shrink-0 overflow-hidden ${isZoomed ? "cursor-zoom-out" : "cursor-zoom-in"} place-items-center border-0 bg-transparent p-0`
           }
-          style={isActualSize ? { touchAction: "pan-x pan-y" } : { width: zoomSurfaceSize, height: zoomSurfaceSize, touchAction: "pan-x pan-y" }}
+          style={isActualSize ? { touchAction: "none" } : { width: zoomSurfaceSize, height: zoomSurfaceSize, touchAction: "none" }}
           type="button"
           onClick={toggleZoom}
           onPointerCancel={handleImagePointerEnd}
@@ -251,7 +296,7 @@ export function Lightbox({
           aria-label={isZoomed ? "Fit to screen" : "Zoom to full size"}
         >
           <img
-            className={isActualSize ? "block max-h-none max-w-none object-contain" : "block h-full w-full object-contain"}
+            className={isActualSize ? "block max-h-none max-w-none object-contain" : "block h-full w-full min-h-0 min-w-0 max-h-full max-w-full object-contain"}
             src={imageUrl}
             alt={photo.filename}
           />

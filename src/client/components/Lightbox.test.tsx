@@ -55,9 +55,25 @@ describe("Lightbox", () => {
     const image = screen.getByRole("img", { name: "img_001.jpg" });
 
     expect(zoomButton).toContainElement(image);
+    expect(zoomButton).toHaveClass("min-h-0");
+    expect(zoomButton).toHaveClass("min-w-0");
     expect(image).toHaveClass("h-full");
     expect(image).toHaveClass("w-full");
+    expect(image).toHaveClass("min-h-0");
+    expect(image).toHaveClass("min-w-0");
     expect(image).toHaveClass("object-contain");
+  });
+
+  it("does not let large image intrinsic dimensions force the fit surface past the viewport", () => {
+    render(<Lightbox albumId="family-trip" photo={{ ...photo, width: 6960, height: 4640 }} onClose={vi.fn()} />);
+
+    const zoomButton = screen.getByRole("button", { name: "Zoom to full size" });
+    const image = screen.getByRole("img", { name: "img_001.jpg" });
+
+    expect(zoomButton).toHaveClass("overflow-hidden");
+    expect(zoomButton).toHaveStyle({ width: "100%", height: "100%", touchAction: "none" });
+    expect(image).toHaveClass("max-h-full");
+    expect(image).toHaveClass("max-w-full");
   });
 
   it("toggles between fit and full-size image views", async () => {
@@ -86,9 +102,30 @@ describe("Lightbox", () => {
     const fitButton = screen.getByRole("button", { name: "Fit to screen" });
     const image = screen.getByRole("img", { name: "img_001.jpg" });
 
-    expect(fitButton).toHaveStyle({ width: "200%", height: "200%", touchAction: "pan-x pan-y" });
+    expect(fitButton).toHaveStyle({ width: "200%", height: "200%", touchAction: "none" });
     expect(image).toHaveClass("h-full");
     expect(image).not.toHaveClass("max-w-none");
+  });
+
+  it("pans a zoomed image with one-finger drag", () => {
+    render(<Lightbox albumId="family-trip" photo={photo} onClose={vi.fn()} />);
+
+    const zoomButton = screen.getByRole("button", { name: "Zoom to full size" });
+    fireEvent.pointerDown(zoomButton, { pointerId: 1, pointerType: "touch", clientX: 0, clientY: 0 });
+    fireEvent.pointerDown(zoomButton, { pointerId: 2, pointerType: "touch", clientX: 100, clientY: 0 });
+    fireEvent.pointerMove(zoomButton, { pointerId: 2, pointerType: "touch", clientX: 200, clientY: 0 });
+    fireEvent.pointerUp(zoomButton, { pointerId: 2, pointerType: "touch", clientX: 200, clientY: 0 });
+
+    const fitButton = screen.getByRole("button", { name: "Fit to screen" });
+    const viewport = fitButton.parentElement;
+    expect(viewport).not.toBeNull();
+
+    if (viewport) {
+      fireEvent.pointerMove(fitButton, { pointerId: 1, pointerType: "touch", clientX: -30, clientY: -40 });
+
+      expect(viewport.scrollLeft).toBe(30);
+      expect(viewport.scrollTop).toBe(40);
+    }
   });
 
   it("resets pinch zoom when the photo changes", () => {
