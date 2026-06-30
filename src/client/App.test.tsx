@@ -2,6 +2,11 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { downloadSequentially } from "./downloads";
+
+vi.mock("./downloads", () => ({
+  downloadSequentially: vi.fn()
+}));
 
 const albumIndex = {
   version: 1,
@@ -32,6 +37,7 @@ describe("App", () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    vi.mocked(downloadSequentially).mockReset();
     window.history.pushState({}, "", originalPath);
   });
 
@@ -94,7 +100,8 @@ describe("App", () => {
   });
 
 
-  it("shows direct download links for selected photos", async () => {
+  it("downloads selected photos through the private image route", async () => {
+    vi.mocked(downloadSequentially).mockResolvedValue();
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () =>
@@ -119,12 +126,16 @@ describe("App", () => {
 
     await userEvent.click(await screen.findByLabelText("Select img_001.jpg"));
 
-    const directLink = screen.getByRole("link", { name: "Download img_001.jpg" });
-    expect(directLink).toHaveAttribute("href", "/img/family-trip/full/img_001");
-    expect(directLink).toHaveAttribute("download", "img_001.jpg");
+    await userEvent.click(screen.getByRole("button", { name: "Download img_001.jpg" }));
+
+    expect(downloadSequentially).toHaveBeenCalledWith(
+      [{ url: "/img/family-trip/full/img_001", filename: "img_001.jpg" }],
+      0
+    );
   });
 
   it("uses share image routes for selected downloads and lightbox originals", async () => {
+    vi.mocked(downloadSequentially).mockResolvedValue();
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () =>
@@ -148,14 +159,19 @@ describe("App", () => {
     render(<App />);
 
     await userEvent.click(await screen.findByLabelText("Select img_001.jpg"));
-    const directLink = screen.getByRole("link", { name: "Download img_001.jpg" });
-    expect(directLink).toHaveAttribute("href", "/share-img/sample-token/full/img_001");
+    await userEvent.click(screen.getByRole("button", { name: "Download img_001.jpg" }));
+    expect(downloadSequentially).toHaveBeenCalledWith(
+      [{ url: "/share-img/sample-token/full/img_001", filename: "img_001.jpg" }],
+      0
+    );
 
     await userEvent.click(screen.getByRole("img", { name: "img_001.jpg" }));
     const dialog = screen.getByRole("dialog", { name: "img_001.jpg" });
-    const originalLink = within(dialog).getByRole("link", { name: "Download original" });
-    expect(originalLink).toHaveAttribute("href", "/share-img/sample-token/full/img_001");
-    expect(originalLink).toHaveAttribute("download", "img_001.jpg");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Download original" }));
+    expect(downloadSequentially).toHaveBeenLastCalledWith(
+      [{ url: "/share-img/sample-token/full/img_001", filename: "img_001.jpg" }],
+      0
+    );
   });
 
   it("makes the lightbox modal, closes on Escape, and restores focus", async () => {
