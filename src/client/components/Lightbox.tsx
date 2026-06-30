@@ -1,7 +1,27 @@
 import { Check, ChevronLeft, ChevronRight, Download, Plus, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { downloadSequentially } from "../downloads";
 import type { PhotoManifestItem } from "../types";
+
+const MAX_PINCH_SCALE = 4;
+
+type PointerPoint = {
+  x: number;
+  y: number;
+};
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function distanceBetweenFirstTwo(points: Map<number, PointerPoint>): number | null {
+  const [first, second] = Array.from(points.values());
+  if (!first || !second) {
+    return null;
+  }
+
+  return Math.hypot(second.x - first.x, second.y - first.y);
+}
 
 export function Lightbox({
   albumId,
@@ -27,9 +47,17 @@ export function Lightbox({
   onClose: () => void;
 }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const activePointersRef = useRef<Map<number, PointerPoint>>(new Map());
+  const pinchStartRef = useRef<{ distance: number; scale: number } | null>(null);
+  const suppressNextClickRef = useRef(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  const [isZoomed, setIsZoomed] = useState(false);
+  const [zoomMode, setZoomMode] = useState<"fit" | "actual">("fit");
+  const [pinchScale, setPinchScale] = useState(1);
+  const isActualSize = zoomMode === "actual";
+  const isPinchZoomed = pinchScale > 1;
+  const isZoomed = isActualSize || isPinchZoomed;
+  const zoomSurfaceSize = `${pinchScale * 100}%`;
   const imageUrl = shareToken
     ? `/share-img/${encodeURIComponent(shareToken)}/full/${encodeURIComponent(photo.id)}`
     : `/img/${encodeURIComponent(albumId)}/full/${encodeURIComponent(photo.id)}`;
@@ -46,7 +74,11 @@ export function Lightbox({
   }, []);
 
   useEffect(() => {
-    setIsZoomed(false);
+    activePointersRef.current.clear();
+    pinchStartRef.current = null;
+    suppressNextClickRef.current = false;
+    setZoomMode("fit");
+    setPinchScale(1);
   }, [photo.id]);
 
   useEffect(() => {
@@ -79,6 +111,94 @@ export function Lightbox({
       setDownloadError(error instanceof Error ? error.message : "Download failed");
     } finally {
       setIsDownloading(false);
+    }
+  }
+
+  function resetZoom() {
+    activePointersRef.current.clear();
+    pinchStartRef.current = null;
+    suppressNextClickRef.current = false;
+    setZoomMode("fit");
+    setPinchScale(1);
+  }
+
+  function toggleZoom() {
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false;
+      return;
+    }
+
+    if (isZoomed) {
+      resetZoom();
+      return;
+    }
+
+    setZoomMode("actual");
+  }
+
+  function startPinchIfReady() {
+    const distance = distanceBetweenFirstTwo(activePointersRef.current);
+    if (!distance || distance <= 0) {
+      return;
+    }
+
+    pinchStartRef.current = { distance, scale: pinchScale };
+  }
+
+  function handleImagePointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.pointerType !== "touch") {
+      return;
+    }
+
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    activePointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+    if (activePointersRef.current.size === 2) {
+      setZoomMode("fit");
+      startPinchIfReady();
+    }
+  }
+
+  function handleImagePointerMove(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (!activePointersRef.current.has(event.pointerId)) {
+      return;
+    }
+
+    activePointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (activePointersRef.current.size < 2) {
+      return;
+    }
+
+    const currentDistance = distanceBetweenFirstTwo(activePointersRef.current);
+    if (!currentDistance) {
+      return;
+    }
+
+    if (!pinchStartRef.current) {
+      startPinchIfReady();
+    }
+
+    if (!pinchStartRef.current) {
+      return;
+    }
+
+    event.preventDefault();
+    const nextScale = clamp(pinchStartRef.current.scale * (currentDistance / pinchStartRef.current.distance), 1, MAX_PINCH_SCALE);
+
+    suppressNextClickRef.current = true;
+    setZoomMode("fit");
+    setPinchScale(nextScale);
+  }
+
+  function handleImagePointerEnd(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.pointerType !== "touch") {
+      return;
+    }
+
+    activePointersRef.current.delete(event.pointerId);
+    if (activePointersRef.current.size < 2) {
+      pinchStartRef.current = null;
+      setPinchScale((scale) => (scale < 1.02 ? 1 : scale));
     }
   }
 
@@ -117,16 +237,21 @@ export function Lightbox({
         </button>
         <button
           className={
-            isZoomed
+            isActualSize
               ? "block min-h-full min-w-full cursor-zoom-out border-0 bg-transparent p-0"
-              : "grid h-full w-full cursor-zoom-in place-items-center border-0 bg-transparent p-0"
+              : `grid h-full w-full ${isZoomed ? "cursor-zoom-out" : "cursor-zoom-in"} place-items-center border-0 bg-transparent p-0`
           }
+          style={isActualSize ? { touchAction: "pan-x pan-y" } : { width: zoomSurfaceSize, height: zoomSurfaceSize, touchAction: "pan-x pan-y" }}
           type="button"
-          onClick={() => setIsZoomed((value) => !value)}
+          onClick={toggleZoom}
+          onPointerCancel={handleImagePointerEnd}
+          onPointerDown={handleImagePointerDown}
+          onPointerMove={handleImagePointerMove}
+          onPointerUp={handleImagePointerEnd}
           aria-label={isZoomed ? "Fit to screen" : "Zoom to full size"}
         >
           <img
-            className={isZoomed ? "block max-h-none max-w-none object-contain" : "block max-h-full max-w-full object-contain"}
+            className={isActualSize ? "block max-h-none max-w-none object-contain" : "block h-full w-full object-contain"}
             src={imageUrl}
             alt={photo.filename}
           />

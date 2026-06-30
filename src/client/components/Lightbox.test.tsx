@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { downloadSequentially } from "../downloads";
@@ -55,8 +55,8 @@ describe("Lightbox", () => {
     const image = screen.getByRole("img", { name: "img_001.jpg" });
 
     expect(zoomButton).toContainElement(image);
-    expect(image).toHaveClass("max-h-full");
-    expect(image).toHaveClass("max-w-full");
+    expect(image).toHaveClass("h-full");
+    expect(image).toHaveClass("w-full");
     expect(image).toHaveClass("object-contain");
   });
 
@@ -71,6 +71,39 @@ describe("Lightbox", () => {
     await userEvent.click(screen.getByRole("button", { name: "Fit to screen" }));
 
     expect(screen.getByRole("button", { name: "Zoom to full size" })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "img_001.jpg" })).toHaveClass("max-w-full");
+    expect(screen.getByRole("img", { name: "img_001.jpg" })).toHaveClass("w-full");
+  });
+
+  it("pinch zooms the fitted image", () => {
+    render(<Lightbox albumId="family-trip" photo={photo} onClose={vi.fn()} />);
+
+    const zoomButton = screen.getByRole("button", { name: "Zoom to full size" });
+
+    fireEvent.pointerDown(zoomButton, { pointerId: 1, pointerType: "touch", clientX: 0, clientY: 0 });
+    fireEvent.pointerDown(zoomButton, { pointerId: 2, pointerType: "touch", clientX: 100, clientY: 0 });
+    fireEvent.pointerMove(zoomButton, { pointerId: 2, pointerType: "touch", clientX: 200, clientY: 0 });
+
+    const fitButton = screen.getByRole("button", { name: "Fit to screen" });
+    const image = screen.getByRole("img", { name: "img_001.jpg" });
+
+    expect(fitButton).toHaveStyle({ width: "200%", height: "200%", touchAction: "pan-x pan-y" });
+    expect(image).toHaveClass("h-full");
+    expect(image).not.toHaveClass("max-w-none");
+  });
+
+  it("resets pinch zoom when the photo changes", () => {
+    const secondPhoto = { ...photo, id: "img_002", filename: "img_002.jpg" };
+    const { rerender } = render(<Lightbox albumId="family-trip" photo={photo} onClose={vi.fn()} />);
+
+    const zoomButton = screen.getByRole("button", { name: "Zoom to full size" });
+    fireEvent.pointerDown(zoomButton, { pointerId: 1, pointerType: "touch", clientX: 0, clientY: 0 });
+    fireEvent.pointerDown(zoomButton, { pointerId: 2, pointerType: "touch", clientX: 100, clientY: 0 });
+    fireEvent.pointerMove(zoomButton, { pointerId: 2, pointerType: "touch", clientX: 200, clientY: 0 });
+
+    expect(screen.getByRole("button", { name: "Fit to screen" })).toHaveStyle({ width: "200%" });
+
+    rerender(<Lightbox albumId="family-trip" photo={secondPhoto} onClose={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Zoom to full size" })).toHaveStyle({ width: "100%", height: "100%" });
   });
 });
