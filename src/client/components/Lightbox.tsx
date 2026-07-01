@@ -1,34 +1,39 @@
 import { Check, ChevronLeft, ChevronRight, Download, Plus, X } from "lucide-react";
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { TransformComponent, TransformWrapper, type ReactZoomPanPinchContentRef } from "react-zoom-pan-pinch";
 import { downloadSequentially } from "../downloads";
 import type { PhotoManifestItem } from "../types";
 
-const MAX_PINCH_SCALE = 4;
+const CLICK_ZOOM_SCALE = 2;
+const MAX_ZOOM_SCALE = 4;
+const ZOOMED_SCALE_THRESHOLD = 1.01;
 
-type PointerPoint = {
-  x: number;
-  y: number;
-};
-
-type PanStart = {
-  pointerId: number;
-  x: number;
-  y: number;
-  scrollLeft: number;
-  scrollTop: number;
-};
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
+function isTransformedZoomed(scale: number): boolean {
+  return scale > ZOOMED_SCALE_THRESHOLD;
 }
 
-function distanceBetweenFirstTwo(points: Map<number, PointerPoint>): number | null {
-  const [first, second] = Array.from(points.values());
-  if (!first || !second) {
-    return null;
-  }
+function ResetTransformOnPhotoChange({
+  photoId,
+  resetTransform,
+  onReset
+}: {
+  photoId: string;
+  resetTransform: ReactZoomPanPinchContentRef["resetTransform"];
+  onReset: () => void;
+}) {
+  const lastPhotoIdRef = useRef(photoId);
 
-  return Math.hypot(second.x - first.x, second.y - first.y);
+  useEffect(() => {
+    if (lastPhotoIdRef.current === photoId) {
+      return;
+    }
+
+    lastPhotoIdRef.current = photoId;
+    resetTransform(0);
+    onReset();
+  }, [onReset, photoId, resetTransform]);
+
+  return null;
 }
 
 export function Lightbox({
@@ -55,19 +60,10 @@ export function Lightbox({
   onClose: () => void;
 }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const viewportRef = useRef<HTMLDivElement>(null);
-  const activePointersRef = useRef<Map<number, PointerPoint>>(new Map());
-  const pinchStartRef = useRef<{ distance: number; scale: number } | null>(null);
-  const panStartRef = useRef<PanStart | null>(null);
-  const suppressNextClickRef = useRef(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  const [zoomMode, setZoomMode] = useState<"fit" | "actual">("fit");
-  const [pinchScale, setPinchScale] = useState(1);
-  const isActualSize = zoomMode === "actual";
-  const isPinchZoomed = pinchScale > 1;
-  const isZoomed = isActualSize || isPinchZoomed;
-  const zoomSurfaceSize = `${pinchScale * 100}%`;
+  const [isUsingFullImage, setIsUsingFullImage] = useState(false);
+  const [isGestureZoomed, setIsGestureZoomed] = useState(false);
   const fullImageUrl = shareToken
     ? `/share-img/${encodeURIComponent(shareToken)}/full/${encodeURIComponent(photo.id)}`
     : `/img/${encodeURIComponent(albumId)}/full/${encodeURIComponent(photo.id)}`;
@@ -76,7 +72,7 @@ export function Lightbox({
       ? `/share-img/${encodeURIComponent(shareToken)}/display/${encodeURIComponent(photo.id)}`
       : `/img/${encodeURIComponent(albumId)}/display/${encodeURIComponent(photo.id)}`
     : fullImageUrl;
-  const visibleImageUrl = isActualSize ? fullImageUrl : displayImageUrl;
+  const visibleImageUrl = isUsingFullImage ? fullImageUrl : displayImageUrl;
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -89,14 +85,27 @@ export function Lightbox({
     };
   }, []);
 
-  useEffect(() => {
-    activePointersRef.current.clear();
-    pinchStartRef.current = null;
-    panStartRef.current = null;
-    suppressNextClickRef.current = false;
-    setZoomMode("fit");
-    setPinchScale(1);
-  }, [photo.id]);
+  const resetZoomState = useCallback(() => {
+    setIsUsingFullImage(false);
+    setIsGestureZoomed(false);
+  }, []);
+
+  const useFullImageForZoom = useCallback(() => {
+    setIsUsingFullImage(true);
+  }, []);
+
+  const handleTransform = useCallback((_ref: ReactZoomPanPinchContentRef, state: { scale: number }) => {
+    const nextIsZoomed = isTransformedZoomed(state.scale);
+
+    setIsGestureZoomed((currentIsZoomed) => (currentIsZoomed === nextIsZoomed ? currentIsZoomed : nextIsZoomed));
+    setIsUsingFullImage((currentIsUsingFullImage) => {
+      if (nextIsZoomed) {
+        return true;
+      }
+
+      return currentIsUsingFullImage ? false : currentIsUsingFullImage;
+    });
+  }, []);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -131,123 +140,15 @@ export function Lightbox({
     }
   }
 
-  function resetZoom() {
-    activePointersRef.current.clear();
-    pinchStartRef.current = null;
-    panStartRef.current = null;
-    suppressNextClickRef.current = false;
-    setZoomMode("fit");
-    setPinchScale(1);
-  }
-
-  function toggleZoom() {
-    if (suppressNextClickRef.current) {
-      suppressNextClickRef.current = false;
+  function toggleZoom(controls: ReactZoomPanPinchContentRef) {
+    if (isUsingFullImage || isTransformedZoomed(controls.state.scale)) {
+      controls.resetTransform(200);
+      resetZoomState();
       return;
     }
 
-    if (isZoomed) {
-      resetZoom();
-      return;
-    }
-
-    setZoomMode("actual");
-  }
-
-  function startPinchIfReady() {
-    const distance = distanceBetweenFirstTwo(activePointersRef.current);
-    if (!distance || distance <= 0) {
-      return;
-    }
-
-    pinchStartRef.current = { distance, scale: pinchScale };
-  }
-
-  function startPanIfReady() {
-    if (!isZoomed || activePointersRef.current.size !== 1 || !viewportRef.current) {
-      panStartRef.current = null;
-      return;
-    }
-
-    const [[pointerId, point]] = Array.from(activePointersRef.current.entries());
-    if (!point) {
-      panStartRef.current = null;
-      return;
-    }
-
-    panStartRef.current = {
-      pointerId,
-      x: point.x,
-      y: point.y,
-      scrollLeft: viewportRef.current.scrollLeft,
-      scrollTop: viewportRef.current.scrollTop
-    };
-  }
-
-  function handleImagePointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
-    if (event.pointerType !== "touch") {
-      return;
-    }
-
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    activePointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-
-    if (activePointersRef.current.size === 2) {
-      panStartRef.current = null;
-      setZoomMode("fit");
-      startPinchIfReady();
-    } else if (activePointersRef.current.size === 1) {
-      startPanIfReady();
-    }
-  }
-
-  function handleImagePointerMove(event: ReactPointerEvent<HTMLButtonElement>) {
-    if (!activePointersRef.current.has(event.pointerId)) {
-      return;
-    }
-
-    activePointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (activePointersRef.current.size < 2) {
-      if (panStartRef.current?.pointerId === event.pointerId && viewportRef.current) {
-        event.preventDefault();
-        viewportRef.current.scrollLeft = panStartRef.current.scrollLeft + panStartRef.current.x - event.clientX;
-        viewportRef.current.scrollTop = panStartRef.current.scrollTop + panStartRef.current.y - event.clientY;
-      }
-      return;
-    }
-
-    const currentDistance = distanceBetweenFirstTwo(activePointersRef.current);
-    if (!currentDistance) {
-      return;
-    }
-
-    if (!pinchStartRef.current) {
-      startPinchIfReady();
-    }
-
-    if (!pinchStartRef.current) {
-      return;
-    }
-
-    event.preventDefault();
-    const nextScale = clamp(pinchStartRef.current.scale * (currentDistance / pinchStartRef.current.distance), 1, MAX_PINCH_SCALE);
-
-    suppressNextClickRef.current = true;
-    setZoomMode("fit");
-    setPinchScale(nextScale);
-  }
-
-  function handleImagePointerEnd(event: ReactPointerEvent<HTMLButtonElement>) {
-    if (event.pointerType !== "touch") {
-      return;
-    }
-
-    activePointersRef.current.delete(event.pointerId);
-    if (activePointersRef.current.size < 2) {
-      pinchStartRef.current = null;
-      setPinchScale((scale) => (scale < 1.02 ? 1 : scale));
-      startPanIfReady();
-    }
+    setIsUsingFullImage(true);
+    controls.centerView(CLICK_ZOOM_SCALE, 200);
   }
 
   return (
@@ -273,10 +174,7 @@ export function Lightbox({
           {isSelected ? "Remove from selection" : "Add to selection"}
         </button>
       </div>
-      <div
-        ref={viewportRef}
-        className={`relative min-h-0 min-w-0 ${isZoomed ? "overflow-auto" : "grid place-items-center overflow-hidden"}`}
-      >
+      <div className="relative min-h-0 min-w-0 overflow-hidden">
         <button
           className="absolute left-0 top-1/2 z-10 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/95 text-slate-950 disabled:cursor-not-allowed disabled:opacity-30"
           type="button"
@@ -286,27 +184,48 @@ export function Lightbox({
         >
           <ChevronLeft size={24} />
         </button>
-        <button
-          className={
-            isActualSize
-              ? "block min-h-full min-w-full cursor-zoom-out border-0 bg-transparent p-0"
-              : `grid h-full w-full min-h-0 min-w-0 shrink-0 overflow-hidden ${isZoomed ? "cursor-zoom-out" : "cursor-zoom-in"} place-items-center border-0 bg-transparent p-0`
-          }
-          style={isActualSize ? { touchAction: "none" } : { width: zoomSurfaceSize, height: zoomSurfaceSize, touchAction: "none" }}
-          type="button"
-          onClick={toggleZoom}
-          onPointerCancel={handleImagePointerEnd}
-          onPointerDown={handleImagePointerDown}
-          onPointerMove={handleImagePointerMove}
-          onPointerUp={handleImagePointerEnd}
-          aria-label={isZoomed ? "Fit to screen" : "Zoom to full size"}
+        <TransformWrapper
+          centerOnInit
+          centerZoomedOut
+          doubleClick={{ disabled: true }}
+          initialScale={1}
+          maxScale={MAX_ZOOM_SCALE}
+          minScale={1}
+          onPinchStart={useFullImageForZoom}
+          onTransform={handleTransform}
+          onWheelStart={useFullImageForZoom}
+          onZoomStart={useFullImageForZoom}
+          pinch={{ allowPanning: true }}
         >
-          <img
-            className={isActualSize ? "block max-h-none max-w-none object-contain" : "block h-full w-full min-h-0 min-w-0 max-h-full max-w-full object-contain"}
-            src={visibleImageUrl}
-            alt={photo.filename}
-          />
-        </button>
+          {(controls) => {
+            const isZoomed = isUsingFullImage || isGestureZoomed || isTransformedZoomed(controls.state.scale);
+
+            return (
+              <>
+                <ResetTransformOnPhotoChange photoId={photo.id} resetTransform={controls.resetTransform} onReset={resetZoomState} />
+                <TransformComponent
+                  wrapperClass="h-full w-full"
+                  contentClass="flex h-full w-full items-center justify-center"
+                  wrapperStyle={{ height: "100%", width: "100%" }}
+                  contentStyle={{ height: "100%", width: "100%" }}
+                >
+                  <button
+                    className={`grid h-full w-full min-h-0 min-w-0 place-items-center border-0 bg-transparent p-0 ${
+                      isZoomed ? "cursor-zoom-out" : "cursor-zoom-in"
+                    }`}
+                    type="button"
+                    onClick={() => {
+                      toggleZoom(controls);
+                    }}
+                    aria-label={isZoomed ? "Fit to screen" : "Zoom to full size"}
+                  >
+                    <img className="block h-full w-full min-h-0 min-w-0 max-h-full max-w-full object-contain" src={visibleImageUrl} alt={photo.filename} />
+                  </button>
+                </TransformComponent>
+              </>
+            );
+          }}
+        </TransformWrapper>
         <button
           className="absolute right-0 top-1/2 z-10 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/95 text-slate-950 disabled:cursor-not-allowed disabled:opacity-30"
           type="button"

@@ -1,11 +1,63 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { downloadSequentially } from "../downloads";
 import { Lightbox } from "./Lightbox";
 
+const zoomPanPinchMock = vi.hoisted(() => ({
+  centerView: vi.fn(),
+  resetTransform: vi.fn(),
+  transformComponent: vi.fn(
+    ({
+      children,
+      contentClass,
+      contentStyle,
+      wrapperClass,
+      wrapperStyle
+    }: {
+      children: React.ReactNode;
+      contentClass?: string;
+      contentStyle?: React.CSSProperties;
+      wrapperClass?: string;
+      wrapperStyle?: React.CSSProperties;
+    }) => (
+      <div data-testid="zoom-component-wrapper" className={wrapperClass} style={wrapperStyle}>
+        <div data-testid="zoom-content" className={contentClass} style={contentStyle}>
+          {children}
+        </div>
+      </div>
+    )
+  ),
+  transformWrapper: vi.fn(
+    ({
+      children
+    }: {
+      children:
+        | React.ReactNode
+        | ((controls: {
+            centerView: (scale?: number, animationTime?: number) => void;
+            resetTransform: (animationTime?: number) => void;
+            state: { scale: number };
+          }) => React.ReactNode);
+      onPinchStart?: () => void;
+      onTransform?: (_ref: unknown, state: { scale: number }) => void;
+    }) => (
+      <div data-testid="zoom-wrapper">
+        {typeof children === "function"
+          ? children({ centerView: zoomPanPinchMock.centerView, resetTransform: zoomPanPinchMock.resetTransform, state: { scale: 1 } })
+          : children}
+      </div>
+    )
+  )
+}));
+
 vi.mock("../downloads", () => ({
   downloadSequentially: vi.fn()
+}));
+
+vi.mock("react-zoom-pan-pinch", () => ({
+  TransformComponent: zoomPanPinchMock.transformComponent,
+  TransformWrapper: zoomPanPinchMock.transformWrapper
 }));
 
 const photo = {
@@ -21,6 +73,10 @@ const photo = {
 describe("Lightbox", () => {
   beforeEach(() => {
     vi.mocked(downloadSequentially).mockReset();
+    zoomPanPinchMock.centerView.mockReset();
+    zoomPanPinchMock.resetTransform.mockReset();
+    zoomPanPinchMock.transformComponent.mockClear();
+    zoomPanPinchMock.transformWrapper.mockClear();
   });
 
   it("downloads the original through the checked downloader", async () => {
@@ -69,11 +125,12 @@ describe("Lightbox", () => {
   it("does not let large image intrinsic dimensions force the fit surface past the viewport", () => {
     render(<Lightbox albumId="family-trip" photo={{ ...photo, width: 6960, height: 4640 }} onClose={vi.fn()} />);
 
-    const zoomButton = screen.getByRole("button", { name: "Zoom to full size" });
     const image = screen.getByRole("img", { name: "img_001.jpg" });
+    const zoomComponentWrapper = screen.getByTestId("zoom-component-wrapper");
 
-    expect(zoomButton).toHaveClass("overflow-hidden");
-    expect(zoomButton).toHaveStyle({ width: "100%", height: "100%", touchAction: "none" });
+    expect(zoomComponentWrapper).toHaveClass("h-full");
+    expect(zoomComponentWrapper).toHaveClass("w-full");
+    expect(zoomComponentWrapper).toHaveStyle({ width: "100%", height: "100%" });
     expect(image).toHaveClass("max-h-full");
     expect(image).toHaveClass("max-w-full");
   });
@@ -84,14 +141,15 @@ describe("Lightbox", () => {
     await userEvent.click(screen.getByRole("button", { name: "Zoom to full size" }));
 
     expect(screen.getByRole("button", { name: "Fit to screen" })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "img_001.jpg" })).toHaveClass("max-w-none");
     expect(screen.getByRole("img", { name: "img_001.jpg" })).toHaveAttribute("src", "/img/family-trip/full/img_001");
+    expect(zoomPanPinchMock.centerView).toHaveBeenCalledWith(2, 200);
 
     await userEvent.click(screen.getByRole("button", { name: "Fit to screen" }));
 
     expect(screen.getByRole("button", { name: "Zoom to full size" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "img_001.jpg" })).toHaveClass("w-full");
     expect(screen.getByRole("img", { name: "img_001.jpg" })).toHaveAttribute("src", "/img/family-trip/display/img_001");
+    expect(zoomPanPinchMock.resetTransform).toHaveBeenCalledWith(200);
   });
 
   it("falls back to the full route for fit mode when a manifest has no display image", () => {
@@ -108,57 +166,69 @@ describe("Lightbox", () => {
     expect(screen.getByRole("img", { name: "img_001.jpg" })).toHaveAttribute("src", "/share-img/sample-token/display/img_001");
   });
 
-  it("pinch zooms the fitted image", () => {
-    render(<Lightbox albumId="family-trip" photo={photo} onClose={vi.fn()} />);
-
-    const zoomButton = screen.getByRole("button", { name: "Zoom to full size" });
-
-    fireEvent.pointerDown(zoomButton, { pointerId: 1, pointerType: "touch", clientX: 0, clientY: 0 });
-    fireEvent.pointerDown(zoomButton, { pointerId: 2, pointerType: "touch", clientX: 100, clientY: 0 });
-    fireEvent.pointerMove(zoomButton, { pointerId: 2, pointerType: "touch", clientX: 200, clientY: 0 });
-
-    const fitButton = screen.getByRole("button", { name: "Fit to screen" });
-    const image = screen.getByRole("img", { name: "img_001.jpg" });
-
-    expect(fitButton).toHaveStyle({ width: "200%", height: "200%", touchAction: "none" });
-    expect(image).toHaveClass("h-full");
-    expect(image).not.toHaveClass("max-w-none");
-  });
-
-  it("pans a zoomed image with one-finger drag", () => {
-    render(<Lightbox albumId="family-trip" photo={photo} onClose={vi.fn()} />);
-
-    const zoomButton = screen.getByRole("button", { name: "Zoom to full size" });
-    fireEvent.pointerDown(zoomButton, { pointerId: 1, pointerType: "touch", clientX: 0, clientY: 0 });
-    fireEvent.pointerDown(zoomButton, { pointerId: 2, pointerType: "touch", clientX: 100, clientY: 0 });
-    fireEvent.pointerMove(zoomButton, { pointerId: 2, pointerType: "touch", clientX: 200, clientY: 0 });
-    fireEvent.pointerUp(zoomButton, { pointerId: 2, pointerType: "touch", clientX: 200, clientY: 0 });
-
-    const fitButton = screen.getByRole("button", { name: "Fit to screen" });
-    const viewport = fitButton.parentElement;
-    expect(viewport).not.toBeNull();
-
-    if (viewport) {
-      fireEvent.pointerMove(fitButton, { pointerId: 1, pointerType: "touch", clientX: -30, clientY: -40 });
-
-      expect(viewport.scrollLeft).toBe(30);
-      expect(viewport.scrollTop).toBe(40);
-    }
-  });
-
-  it("resets pinch zoom when the photo changes", () => {
+  it("delegates zoom gestures to the zoom component and resets when the photo changes", () => {
     const secondPhoto = { ...photo, id: "img_002", filename: "img_002.jpg" };
     const { rerender } = render(<Lightbox albumId="family-trip" photo={photo} onClose={vi.fn()} />);
 
-    const zoomButton = screen.getByRole("button", { name: "Zoom to full size" });
-    fireEvent.pointerDown(zoomButton, { pointerId: 1, pointerType: "touch", clientX: 0, clientY: 0 });
-    fireEvent.pointerDown(zoomButton, { pointerId: 2, pointerType: "touch", clientX: 100, clientY: 0 });
-    fireEvent.pointerMove(zoomButton, { pointerId: 2, pointerType: "touch", clientX: 200, clientY: 0 });
-
-    expect(screen.getByRole("button", { name: "Fit to screen" })).toHaveStyle({ width: "200%" });
+    expect(screen.getByTestId("zoom-wrapper")).toBeInTheDocument();
+    expect(screen.getByTestId("zoom-content")).toContainElement(screen.getByRole("img", { name: "img_001.jpg" }));
+    expect(zoomPanPinchMock.transformWrapper).toHaveBeenCalled();
+    expect(zoomPanPinchMock.transformWrapper.mock.calls[0]?.[0]).toMatchObject({
+      centerOnInit: true,
+      centerZoomedOut: true,
+      initialScale: 1,
+      maxScale: 4,
+      minScale: 1,
+      doubleClick: { disabled: true },
+      pinch: { allowPanning: true }
+    });
 
     rerender(<Lightbox albumId="family-trip" photo={secondPhoto} onClose={vi.fn()} />);
 
-    expect(screen.getByRole("button", { name: "Zoom to full size" })).toHaveStyle({ width: "100%", height: "100%" });
+    expect(zoomPanPinchMock.resetTransform).toHaveBeenCalledWith(0);
+  });
+
+  it("uses the full image route when a zoom gesture starts", () => {
+    render(<Lightbox albumId="family-trip" photo={photo} onClose={vi.fn()} />);
+
+    const wrapperProps = zoomPanPinchMock.transformWrapper.mock.calls[0]?.[0];
+
+    act(() => {
+      wrapperProps.onPinchStart?.();
+    });
+
+    expect(screen.getByRole("button", { name: "Fit to screen" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "img_001.jpg" })).toHaveAttribute("src", "/img/family-trip/full/img_001");
+  });
+
+  it("updates zoom state when the zoom component transforms", () => {
+    render(<Lightbox albumId="family-trip" photo={photo} onClose={vi.fn()} />);
+
+    const wrapperProps = zoomPanPinchMock.transformWrapper.mock.calls[0]?.[0];
+
+    act(() => {
+      wrapperProps.onTransform?.({}, { scale: 1.8 });
+    });
+
+    expect(screen.getByRole("button", { name: "Fit to screen" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "img_001.jpg" })).toHaveAttribute("src", "/img/family-trip/full/img_001");
+  });
+
+  it("resets package zoom state when the photo changes", () => {
+    const secondPhoto = { ...photo, id: "img_002", filename: "img_002.jpg" };
+    const { rerender } = render(<Lightbox albumId="family-trip" photo={photo} onClose={vi.fn()} />);
+
+    const wrapperProps = zoomPanPinchMock.transformWrapper.mock.calls[0]?.[0];
+
+    act(() => {
+      wrapperProps.onPinchStart?.();
+    });
+
+    expect(screen.getByRole("button", { name: "Fit to screen" })).toBeInTheDocument();
+
+    rerender(<Lightbox albumId="family-trip" photo={secondPhoto} onClose={vi.fn()} />);
+
+    expect(zoomPanPinchMock.resetTransform).toHaveBeenCalledWith(0);
+    expect(screen.getByRole("button", { name: "Zoom to full size" })).toBeInTheDocument();
   });
 });
